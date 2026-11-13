@@ -4,14 +4,20 @@ import * as THREE from 'three';
 // model: сжатая glb-модель; paint: имя материала краски; rotY: поворот, чтобы перёд смотрел по +X.
 export const CARS = [
   { id: 'matiz', name: 'Matiz', type: 'hatch', len: 3.50, wid: 1.50, hgt: 1.50, price: 0,    maxSpeed: 36, accel: 7.5,
-    model: 'models/matiz.glb', paint: 'material_1', rotY: Math.PI / 2, desc: 'Маленький и юркий' },
+    model: 'models/matiz.glb', paint: 'material_1', rotY: Math.PI / 2, desc: 'Маленький и юркий', parked: 3 },
   { id: 'damas', name: 'Damas', type: 'van',   len: 3.48, wid: 1.40, hgt: 1.90, price: 4000, maxSpeed: 30, accel: 6.0,
-    model: 'models/damas.glb', paint: 'material_3', rotY: Math.PI, desc: 'Легенда ташкентских маршруток' },
+    model: 'models/damas.glb', paint: 'material_3', rotY: Math.PI, desc: 'Легенда ташкентских маршруток', parked: 2 },
+  { id: 'nexia', name: 'Nexia', type: 'sedan', len: 4.48, wid: 1.66, hgt: 1.42, price: 12000, maxSpeed: 46, accel: 9.0,
+    model: 'models/nexia.glb', paint: 'paint', rotY: Math.PI / 2, desc: 'Народный седан', parked: 3 },
+  { id: 'malibu', name: 'Malibu', type: 'sedan', len: 4.92, wid: 1.85, hgt: 1.47, price: 55000, maxSpeed: 62, accel: 12.5,
+    model: 'models/malibu.glb', paint: 'int_mat', rotY: Math.PI / 2, desc: 'Бизнес-класс', parked: 1 },
 ];
 
 export const CREDITS = [
   'Chevrolet Damas — own.guest (Sketchfab), CC BY 4.0',
   'Daewoo Matiz — Serial Designation N-0X0010010 (Sketchfab), CC BY 4.0',
+  'Daewoo Nexia — Villanueva-Jonatan-32621 (Sketchfab), CC BY 4.0',
+  'Chevrolet Malibu — Ddiaz Design (Sketchfab), CC BY 4.0',
 ];
 
 // Белый первым: все машины с завода белые
@@ -286,7 +292,7 @@ function prepareTemplate(spec, scene) {
   wrap.updateMatrixWorld(true);
   box = new THREE.Box3().setFromObject(wrap);
   const s2 = box.getSize(new THREE.Vector3());
-  spec.wid = s2.z; spec.hgt = s2.y;
+  spec.hgt = s2.y;           // ширину оставляем по кузову (без зеркал) — для физики и парковки
 
   wrap.traverse(o => {
     if (!o.isMesh) return;
@@ -303,7 +309,7 @@ function prepareTemplate(spec, scene) {
   for (const m of meshes) {
     tmp.setFromObject(m); tmp.getCenter(cc); tmp.getSize(ss);
     const round = ss.y > 0.3 && ss.y < 0.85 && Math.abs(ss.x - ss.y) < ss.y * 0.25;
-    if (!round || cc.y > spec.hgt * 0.3 || Math.abs(cc.x) < spec.len * 0.15) continue;
+    if (!round || cc.y > s2.y * 0.3 || Math.abs(cc.x) < spec.len * 0.15) continue;
     const axle = ss.z > spec.wid * 0.5;          // колёса оси слиты в одну деталь
     const key = `${Math.sign(cc.x)}${axle ? 'A' : Math.sign(cc.z)}`;
     if (!parts.has(key)) parts.set(key, { meshes: [], box: new THREE.Box3() });
