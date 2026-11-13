@@ -261,7 +261,11 @@ export async function loadCarModels() {
   const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
   await Promise.all(CARS.map(async spec => {
     try {
-      const gltf = await loader.loadAsync(spec.model);
+      // модели могут быть встроены в страницу (window.__MODEL_DATA: base64) или лежать рядом файлами
+      const b64 = window.__MODEL_DATA && window.__MODEL_DATA[spec.id];
+      const gltf = b64
+        ? await loader.parseAsync(Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer, '')
+        : await loader.loadAsync(spec.model);
       templates.set(spec.id, prepareTemplate(spec, gltf.scene));
     } catch (e) { console.warn('Не удалось загрузить', spec.model, e); }
   }));
