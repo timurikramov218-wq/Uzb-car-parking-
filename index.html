@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0b1a24">
+<title>UZB Car Parking</title>
+<link rel="stylesheet" href="style.css">
+<script src="vendor/peerjs.min.js"></script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div class="top-left">
+    <button class="icon-btn" id="btn-pause" title="Меню (Esc)">☰</button>
+    <div id="online-info" class="pill hidden"></div>
+  </div>
+  <div class="top-right"><div class="pill money">💰 <span id="money">0</span> сум</div></div>
+  <div id="level-panel" class="level-panel hidden">
+    <div id="lvl-name"></div>
+    <div class="lvl-stats"><span>⏱ <b id="lvl-time">0</b></span><span>💥 <b id="lvl-hits">0</b></span></div>
+    <div id="lvl-hint" class="lvl-hint"></div>
+  </div>
+  <canvas id="minimap" width="180" height="180"></canvas>
+  <div class="speedo"><b id="speed">0</b><small>км/ч</small><div id="gear">P</div></div>
+  <div id="toast" class="toast"></div>
+  <div id="chat-log" class="chat-log hidden"></div>
+  <input id="chat-input" class="chat-input hidden" maxlength="120" placeholder="Сообщение… (Enter)">
+  <div class="keys-hint">W/S — газ/тормоз · A/D — руль · Пробел — ручник · C — камера · H — сигнал · R — сброс · T — чат</div>
+</div>
+
+<!-- Сенсорное управление -->
+<div id="touch" class="hidden">
+  <div class="tleft"><button data-k="left">◀</button><button data-k="right">▶</button></div>
+  <div class="tright">
+    <button data-k="brake" class="small">✋</button>
+    <button data-k="cam" class="small">🎥</button>
+    <button data-k="horn" class="small">📯</button>
+    <button data-k="down">⬇</button><button data-k="up" class="gas">⬆</button>
+  </div>
+</div>
+
+<!-- Меню -->
+<div id="menu" class="screen">
+  <div class="menu-card">
+    <div class="logo">
+      <div class="flag"><i></i><i></i><i></i></div>
+      <h1>UZB <span>CAR</span> PARKING</h1>
+      <p>Открытый мир · Узбекские машины · Онлайн · Уровни</p>
+    </div>
+    <div class="menu-buttons">
+      <button class="big" data-go="free">🚗 Свободная езда</button>
+      <button class="big" data-go="levels">🅿️ Уровни парковки</button>
+      <button class="big" data-go="online">🌐 Онлайн</button>
+      <button class="big" data-go="garage">🔧 Гараж</button>
+      <button class="big ghost hidden" id="btn-resume" data-go="resume">▶ Продолжить</button>
+    </div>
+    <div class="menu-foot">💰 <span id="menu-money">0</span> сум · <span id="menu-car"></span></div>
+  </div>
+</div>
+
+<div id="levels" class="screen hidden">
+  <div class="panel">
+    <div class="panel-head"><h2>Уровни парковки</h2><button class="icon-btn" data-go="menu">✕</button></div>
+    <div id="level-grid" class="level-grid"></div>
+  </div>
+</div>
+
+<div id="garage" class="screen hidden transparent">
+  <div class="garage-ui">
+    <div class="panel-head"><h2>Гараж</h2><button class="icon-btn" data-go="menu">✕</button></div>
+    <div class="garage-money">💰 <span id="garage-money">0</span> сум</div>
+    <div id="car-list" class="car-list"></div>
+    <h3>Цвет</h3>
+    <div id="color-list" class="color-list"></div>
+    <button id="btn-buy" class="big"></button>
+  </div>
+</div>
+
+<div id="online" class="screen hidden">
+  <div class="panel narrow">
+    <div class="panel-head"><h2>Онлайн</h2><button class="icon-btn" data-go="menu">✕</button></div>
+    <label>Твоё имя<input id="player-name" maxlength="16" placeholder="Например, Timur"></label>
+    <button class="big" id="btn-host">Создать комнату</button>
+    <div class="or">или</div>
+    <label>Код комнаты<input id="room-code" maxlength="4" placeholder="ABCD" style="text-transform:uppercase"></label>
+    <button class="big" id="btn-join">Подключиться</button>
+    <p id="online-status" class="status"></p>
+    <p class="note">Создай комнату и отправь код друзьям — вы окажетесь в одном городе.</p>
+  </div>
+</div>
+
+<div id="result" class="screen hidden">
+  <div class="panel narrow center">
+    <h2 id="res-title"></h2>
+    <div id="res-stars" class="stars"></div>
+    <p id="res-text"></p>
+    <div class="row">
+      <button class="big ghost" id="res-menu">Меню</button>
+      <button class="big ghost" id="res-retry">Заново</button>
+      <button class="big" id="res-next">Дальше ▶</button>
+    </div>
+  </div>
+</div>
+
+<div id="loading" class="screen"><div class="loader">Строим Ташкент…</div></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
