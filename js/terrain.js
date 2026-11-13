@@ -4,21 +4,21 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 // Горы к северо-востоку от города: шоссе Ташкент — Чарвак — Амирсай.
 // Расстояния и высоты сжаты (реально ~65–100 км и подъём ~1200 м), чтобы доехать за пару минут.
 
-const X0 = 450, X1 = 4350, Z0 = -4350, Z1 = -450, N = 391;     // сетка рельефа 10 м
-const STEP = (X1 - X0) / (N - 1);
+const X0 = 450, X1 = 4350, Z0 = -4350, Z1 = -450, GN = 391;     // сетка рельефа 10 м
+const STEP = (X1 - X0) / (GN - 1);
 const CITY = 660;
 
 // --- детерминированный шум ---
-function hash(x, y) { let h = x * 374761393 + y * 668265263; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967295; }
+function thash(x, y) { let h = x * 374761393 + y * 668265263; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967295; }
 function vnoise(x, y) {
   const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
   const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
-  const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+  const a = thash(xi, yi), b = thash(xi + 1, yi), c = thash(xi, yi + 1), d = thash(xi + 1, yi + 1);
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
 function fbm(x, y, oct = 5) { let s = 0, a = 0.5, f = 1; for (let i = 0; i < oct; i++) { s += a * vnoise(x * f, y * f); f *= 2.03; a *= 0.5; } return s; }
 function ridged(x, y, oct = 5) { let s = 0, a = 0.5, f = 1; for (let i = 0; i < oct; i++) { s += a * (1 - Math.abs(vnoise(x * f, y * f) * 2 - 1)) ** 2; f *= 2.1; a *= 0.5; } return s; }
-const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 // Маршрут: от северо-восточного угла города через предгорья, вдоль южного берега Чарвака, серпантином к Амирсаю
 const CTRL = [[600, -600], [820, -820], [1080, -1060], [1380, -1290], [1690, -1520], [1960, -1760], [2200, -1930], [2460, -2030],
@@ -54,9 +54,9 @@ export class Terrain {
     // высота дороги по длине: город → предгорья → берег Чарвака → подъём к Амирсаю
     this.roadH = s => {
       if (s < 500) return 0;
-      if (s < sLake0) return 70 * smooth(500, sLake0, s);
+      if (s < sLake0) return 70 * sstep(500, sLake0, s);
       if (s < sLake1) return 70;
-      return 70 + 105 * smooth(sLake1, len, s);
+      return 70 + 105 * sstep(sLake1, len, s);
     };
     for (const p of this.path) p.y = this.roadH(p.s);
     // хеш точек пути для быстрых запросов расстояния
@@ -89,33 +89,33 @@ export class Terrain {
   baseH(x, z) {
     if (Math.abs(x) < CITY && Math.abs(z) < CITY) return 0;
     const p = (x - z) / Math.SQRT2;
-    const foot = smooth(900, 1900, p), mount = smooth(1900, 3800, p);
+    const foot = sstep(900, 1900, p), mount = sstep(1900, 3800, p);
     let h = foot * (8 + 55 * fbm(x / 420, z / 420, 4)) + mount * (50 + 400 * ridged(x / 1000 + 7, z / 1000 - 3, 5));
     // к краям участка рельеф плавно уходит к степи (без обрыва)
     const edge = Math.min(x - X0, Z1 - z, X1 - x, z - Z0);
-    h *= smooth(0, 520, edge);
+    h *= sstep(0, 520, edge);
     const ld = this.lakeD(x, z);
-    if (ld < 1.6) { const water = 66; h = h * smooth(0.9, 1.6, ld) + (water - 18 * (1 - Math.min(ld, 1))) * (1 - smooth(0.9, 1.6, ld)); }
+    if (ld < 1.6) { const water = 66; h = h * sstep(0.9, 1.6, ld) + (water - 18 * (1 - Math.min(ld, 1))) * (1 - sstep(0.9, 1.6, ld)); }
     // площадка Амирсая
     const e = this.end, de = Math.hypot(x - e.x, z - e.z);
-    if (de < 260) h = h * smooth(110, 260, de) + this.roadH(e.s) * (1 - smooth(110, 260, de));
+    if (de < 260) h = h * sstep(110, 260, de) + this.roadH(e.s) * (1 - sstep(110, 260, de));
     return h;
   }
 
   buildHeights() {
-    const H = this.H = new Float32Array(N * N);
-    this.snowMask = new Float32Array(N * N);
+    const H = this.H = new Float32Array(GN * GN);
+    this.snowMask = new Float32Array(GN * GN);
     this.lift = this.liftLine();
-    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    for (let j = 0; j < GN; j++) for (let i = 0; i < GN; i++) {
       const x = X0 + i * STEP, z = Z0 + j * STEP;
       let h = this.baseH(x, z);
       const np = this.nearPath(x, z, 140);
-      if (np) h = np.p.y + (h - np.p.y) * smooth(11, 30 + Math.min(110, Math.abs(h - np.p.y) * 0.9), np.d);     // полотно дороги и пологие откосы
-      H[j * N + i] = h;
+      if (np) h = np.p.y + (h - np.p.y) * sstep(11, 30 + Math.min(110, Math.abs(h - np.p.y) * 0.9), np.d);     // полотно дороги и пологие откосы
+      H[j * GN + i] = h;
       // снег на трассе вдоль подъёмника
       const L = this.lift, ax = L.b.x - L.a.x, az = L.b.z - L.a.z, t = Math.max(0, Math.min(1, ((x - L.a.x) * ax + (z - L.a.z) * az) / (ax * ax + az * az)));
       const dl = Math.hypot(x - (L.a.x + ax * t), z - (L.a.z + az * t));
-      this.snowMask[j * N + i] = t > 0.03 ? 1 - smooth(25, 60, dl) : 0;
+      this.snowMask[j * GN + i] = t > 0.03 ? 1 - sstep(25, 60, dl) : 0;
     }
   }
 
@@ -132,28 +132,28 @@ export class Terrain {
   heightAt(x, z) {
     if (x < X0 || x > X1 || z < Z0 || z > Z1) return 0;
     const fx = (x - X0) / STEP, fz = (z - Z0) / STEP;
-    const i = Math.min(N - 2, Math.floor(fx)), j = Math.min(N - 2, Math.floor(fz)), u = fx - i, v = fz - j;
-    const H = this.H, a = H[j * N + i], b = H[j * N + i + 1], c = H[(j + 1) * N + i], d = H[(j + 1) * N + i + 1];
+    const i = Math.min(GN - 2, Math.floor(fx)), j = Math.min(GN - 2, Math.floor(fz)), u = fx - i, v = fz - j;
+    const H = this.H, a = H[j * GN + i], b = H[j * GN + i + 1], c = H[(j + 1) * GN + i], d = H[(j + 1) * GN + i + 1];
     return Math.max(0, a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v);
   }
 
   buildMesh() {
-    const g = new THREE.PlaneGeometry(X1 - X0, Z1 - Z0, N - 1, N - 1); g.rotateX(-Math.PI / 2);
+    const g = new THREE.PlaneGeometry(X1 - X0, Z1 - Z0, GN - 1, GN - 1); g.rotateX(-Math.PI / 2);
     const pos = g.attributes.position, col = new Float32Array(pos.count * 3), c = new THREE.Color();
     const dry = new THREE.Color(0xb7a676), green = new THREE.Color(0x6e8a47), dark = new THREE.Color(0x4d6b3a), rock = new THREE.Color(0x9a9184), snow = new THREE.Color(0xf1f4f8), sand = new THREE.Color(0xcdbb8f);
     for (let k = 0; k < pos.count; k++) {
       // PlaneGeometry после поворота: x слева направо, z сверху вниз (от -h/2 до h/2)
       const x = pos.getX(k) + (X0 + X1) / 2, z = pos.getZ(k) + (Z0 + Z1) / 2;
-      const i = Math.round((x - X0) / STEP), j = Math.round((z - Z0) / STEP), h = this.H[j * N + i];
+      const i = Math.round((x - X0) / STEP), j = Math.round((z - Z0) / STEP), h = this.H[j * GN + i];
       const inCity = Math.abs(x) < CITY + 20 && Math.abs(z) < CITY + 20;
       pos.setY(k, inCity ? -0.35 : h);
-      const hx = this.H[j * N + Math.min(N - 1, i + 1)] - this.H[j * N + Math.max(0, i - 1)], hz = this.H[Math.min(N - 1, j + 1) * N + i] - this.H[Math.max(0, j - 1) * N + i];
+      const hx = this.H[j * GN + Math.min(GN - 1, i + 1)] - this.H[j * GN + Math.max(0, i - 1)], hz = this.H[Math.min(GN - 1, j + 1) * GN + i] - this.H[Math.max(0, j - 1) * GN + i];
       const slope = Math.hypot(hx, hz) / (2 * STEP);
       const n = fbm(x / 60, z / 60, 3);
-      c.copy(dry).lerp(green, smooth(10, 60, h) * (0.75 + n * 0.4)).lerp(dark, smooth(140, 280, h) * 0.5);
-      c.lerp(rock, smooth(0.6, 1.1, slope) * 0.85);
+      c.copy(dry).lerp(green, sstep(10, 60, h) * (0.75 + n * 0.4)).lerp(dark, sstep(140, 280, h) * 0.5);
+      c.lerp(rock, sstep(0.6, 1.1, slope) * 0.85);
       const ld = this.lakeD(x, z); if (ld < 1.06 && ld > 0.9) c.lerp(sand, 0.6);
-      c.lerp(snow, Math.max(smooth(330 + n * 60, 400 + n * 60, h), this.snowMask[j * N + i] * smooth(160, 200, h)));
+      c.lerp(snow, Math.max(sstep(330 + n * 60, 400 + n * 60, h), this.snowMask[j * GN + i] * sstep(160, 200, h)));
       c.multiplyScalar(0.88 + n * 0.24);
       col.set([c.r, c.g, c.b], k * 3);
     }
@@ -296,21 +296,21 @@ export class Terrain {
   pines() {
     const spots = [];
     for (let k = 0; k < 9000 && spots.length < 2600; k++) {
-      const x = X0 + hash(k, 11) * (X1 - X0), z = Z0 + hash(k, 29) * (Z1 - Z0);
+      const x = X0 + thash(k, 11) * (X1 - X0), z = Z0 + thash(k, 29) * (Z1 - Z0);
       const p = (x - z) / Math.SQRT2; if (p < 1700) continue;
       const h = this.heightAt(x, z); if (h < 75 || h > 330) continue;
       if (this.lakeD(x, z) < 1.15) continue;
       const np = this.nearPath(x, z, 30); if (np && np.d < 22) continue;
       const e = this.end; if (Math.hypot(x - e.x, z - e.z) < 200) continue;
-      const i = Math.round((x - X0) / STEP), j = Math.round((z - Z0) / STEP); if (this.snowMask[j * N + i] > 0.3) continue;
-      spots.push({ x, z, h, s: 0.7 + hash(k, 3) * 0.8 });
+      const i = Math.round((x - X0) / STEP), j = Math.round((z - Z0) / STEP); if (this.snowMask[j * GN + i] > 0.3) continue;
+      spots.push({ x, z, h, s: 0.7 + thash(k, 3) * 0.8 });
     }
     const crown = mergeGeometries([new THREE.ConeGeometry(2.4, 5, 9).translate(0, 4.5, 0), new THREE.ConeGeometry(1.9, 4.2, 9).translate(0, 7, 0), new THREE.ConeGeometry(1.2, 3.4, 9).translate(0, 9.4, 0)]);
     const trunk = new THREE.CylinderGeometry(0.2, 0.3, 3, 6).translate(0, 1.5, 0);
     const ci = new THREE.InstancedMesh(crown, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }), spots.length);
     const ti = new THREE.InstancedMesh(trunk, new THREE.MeshStandardMaterial({ color: 0x5a4330 }), spots.length);
     const d = new THREE.Object3D(), c = new THREE.Color();
-    spots.forEach((p, i) => { d.position.set(p.x, p.h - 0.2, p.z); d.scale.setScalar(p.s); d.rotation.y = p.x; d.updateMatrix(); ci.setMatrixAt(i, d.matrix); ti.setMatrixAt(i, d.matrix); ci.setColorAt(i, c.setHSL(0.33 + hash(i, 5) * 0.05, 0.4, 0.16 + hash(i, 7) * 0.07)); });
+    spots.forEach((p, i) => { d.position.set(p.x, p.h - 0.2, p.z); d.scale.setScalar(p.s); d.rotation.y = p.x; d.updateMatrix(); ci.setMatrixAt(i, d.matrix); ti.setMatrixAt(i, d.matrix); ci.setColorAt(i, c.setHSL(0.33 + thash(i, 5) * 0.05, 0.4, 0.16 + thash(i, 7) * 0.07)); });
     ci.castShadow = true; this.root.add(ci, ti);
   }
 
@@ -339,11 +339,11 @@ export class Terrain {
     const rock = new THREE.MeshStandardMaterial({ color: 0x9aa3b4, roughness: 1 }), snow = new THREE.MeshStandardMaterial({ color: 0xf4f6f9, roughness: 0.8 });
     const gs = [], ss = [];
     for (let k = 0; k < 34; k++) {
-      const a = -Math.PI * 0.62 + (k / 33) * Math.PI * 0.62 + (hash(k, 1) - 0.5) * 0.05;   // от севера до востока
-      const r = 5000 + hash(k, 2) * 900, w = 700 + hash(k, 3) * 600, h = 650 + hash(k, 4) * 650;
+      const a = -Math.PI * 0.62 + (k / 33) * Math.PI * 0.62 + (thash(k, 1) - 0.5) * 0.05;   // от севера до востока
+      const r = 5000 + thash(k, 2) * 900, w = 700 + thash(k, 3) * 600, h = 650 + thash(k, 4) * 650;
       const x = 1500 + Math.cos(a) * r, z = -1500 + Math.sin(a) * r;
       const g = new THREE.ConeGeometry(w, h, 10, 4); const p = g.attributes.position;
-      for (let i = 0; i < p.count; i++) if (p.getY(i) < h / 2 - 1) { p.setX(i, p.getX(i) * (0.85 + hash(i, k) * 0.3)); p.setY(i, p.getY(i) + (hash(k, i) - 0.5) * h * 0.08); }
+      for (let i = 0; i < p.count; i++) if (p.getY(i) < h / 2 - 1) { p.setX(i, p.getX(i) * (0.85 + thash(i, k) * 0.3)); p.setY(i, p.getY(i) + (thash(k, i) - 0.5) * h * 0.08); }
       g.computeVertexNormals(); g.translate(x, h / 2 - 5, z); gs.push(g.toNonIndexed());
       const sg = new THREE.ConeGeometry(w * 0.32, h * 0.32, 10, 1); sg.translate(x, h * 0.84 - 5, z); ss.push(sg.toNonIndexed());
     }
