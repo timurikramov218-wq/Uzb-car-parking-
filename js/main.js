@@ -87,6 +87,13 @@ const audio = {
       this.engGain = ctx.createGain(); this.engGain.gain.value = 0;
       this.eng.connect(lp); this.eng2.connect(lp); lp.connect(this.engGain); this.engGain.connect(this.master);
       this.eng.start(); this.eng2.start();
+      // шум шин: фильтрованный белый шум, громкость от проскальзывания
+      const buf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource(); noise.buffer = buf; noise.loop = true;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1400; bp.Q.value = 3;
+      this.skidGain = ctx.createGain(); this.skidGain.gain.value = 0;
+      noise.connect(bp); bp.connect(this.skidGain); this.skidGain.connect(this.master); noise.start();
       this.hornGain = ctx.createGain(); this.hornGain.gain.value = 0; this.hornGain.connect(this.master);
       for (const f of [415, 520]) { const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = f; o.connect(this.hornGain); o.start(); }
     } catch { this.ctx = null; }
@@ -98,6 +105,7 @@ const audio = {
     this.eng.frequency.setTargetAtTime(rpm, t, 0.05); this.eng2.frequency.setTargetAtTime(rpm * 0.5, t, 0.05);
     this.engGain.gain.setTargetAtTime(active ? 0.1 + (throttle ? 0.05 : 0) : 0, t, 0.1);
     this.hornGain.gain.setTargetAtTime(horn && active ? 0.07 : 0, t, 0.02);
+    this.skidGain.gain.setTargetAtTime(active && player ? Math.min(0.12, Math.max(0, (player.skid || 0) - 1.05) * 0.25) : 0, t, 0.05);
   },
   thump(v) {
     if (!this.ctx) return;
@@ -133,6 +141,8 @@ function syncMesh(mesh, v) {
     else { w.spin.rotation.z = v.wheelRot; if (w.front) w.pivot.rotation.y = v.steer; }
   }
   for (const m of mesh.userData.lights.brake) m.emissiveIntensity = v.braking ? 2.5 : 0.35;
+  const b = mesh.userData.body;
+  if (b) { b.rotation.x = v.roll || 0; b.rotation.z = v.pitch || 0; }
 }
 
 // ---------- Камера ----------
@@ -168,20 +178,20 @@ const MAP_PX = 1280, MS = MAP_PX / (HALF * 2);
 const mapCanvas = document.createElement('canvas'); mapCanvas.width = mapCanvas.height = MAP_PX;
 function drawMapBase() {
   const g = mapCanvas.getContext('2d'), P = v => (v + HALF) * MS;
-  g.fillStyle = '#e6e2d8'; g.fillRect(0, 0, MAP_PX, MAP_PX);
-  g.fillStyle = '#cfdcc0'; for (const r of [[0, 0, RING_IN]]) { g.beginPath(); g.arc(P(r[0]), P(r[1]), r[2] * MS, 0, 7); g.fill(); }
-  g.fillStyle = '#9cc3cf'; g.fillRect(P(CANAL_X - CANAL_W / 2), 0, CANAL_W * MS, MAP_PX);
-  g.fillStyle = '#ffffff';
+  g.fillStyle = '#1c1d20'; g.fillRect(0, 0, MAP_PX, MAP_PX);
+  g.fillStyle = '#26362a'; for (const r of [[0, 0, RING_IN]]) { g.beginPath(); g.arc(P(r[0]), P(r[1]), r[2] * MS, 0, 7); g.fill(); }
+  g.fillStyle = '#244b57'; g.fillRect(P(CANAL_X - CANAL_W / 2), 0, CANAL_W * MS, MAP_PX);
+  g.fillStyle = '#4a4c52';
   for (const v of VLINES) g.fillRect(P(v.x - W[v.t] / 2), P(-580 - 20), W[v.t] * MS, 1200 * MS);
   for (const h of HLINES) g.fillRect(P(-580 - 20), P(h.z - W[h.t] / 2), 1200 * MS, W[h.t] * MS);
-  g.strokeStyle = '#ffffff'; g.lineWidth = (RING_OUT - RING_IN) * MS; g.beginPath(); g.arc(P(0), P(0), ((RING_IN + RING_OUT) / 2) * MS, 0, 7); g.stroke();
-  g.fillStyle = '#d4cfc3';
+  g.strokeStyle = '#4a4c52'; g.lineWidth = (RING_OUT - RING_IN) * MS; g.beginPath(); g.arc(P(0), P(0), ((RING_IN + RING_OUT) / 2) * MS, 0, 7); g.stroke();
+  g.fillStyle = '#6f6a5c';
   for (const l of world.labels) { g.beginPath(); g.arc(P(l.x), P(l.z), 4, 0, 7); g.fill(); }
 }
 function drawMinimap() {
   const Wd = mm.width, s = 1.6;
   mctx.save();
-  mctx.fillStyle = '#e6e2d8'; mctx.fillRect(0, 0, Wd, Wd);
+  mctx.fillStyle = '#1c1d20'; mctx.fillRect(0, 0, Wd, Wd);
   mctx.translate(Wd / 2, Wd / 2); mctx.rotate(camHeading - Math.PI / 2); mctx.scale(s / MS, s / MS);
   mctx.drawImage(mapCanvas, -(player.x + HALF) * MS, -(player.z + HALF) * MS);
   mctx.restore();
@@ -192,11 +202,11 @@ function drawMinimap() {
     const d = Math.hypot(px - Wd / 2, py - Wd / 2), max = Wd / 2 - 12;
     if (d > max) { px = Wd / 2 + (px - Wd / 2) * max / d; py = Wd / 2 + (py - Wd / 2) * max / d; }
     mctx.fillStyle = col; mctx.beginPath(); mctx.arc(px, py, r, 0, 7); mctx.fill();
-    mctx.strokeStyle = '#fff'; mctx.lineWidth = 3; mctx.stroke();
+    mctx.strokeStyle = '#111'; mctx.lineWidth = 3; mctx.stroke();
   };
-  if (mode === 'level' && levels.spot) dot(levels.spot.x, levels.spot.z, '#1d9a5f', 9);
-  else dot(LEVEL_CENTER.x, LEVEL_CENTER.z, '#c23a2b', 7);
-  mctx.fillStyle = '#2b44c0'; mctx.strokeStyle = '#fff'; mctx.lineWidth = 3;
+  if (mode === 'level' && levels.spot) dot(levels.spot.x, levels.spot.z, '#3ad07a', 9);
+  else dot(LEVEL_CENTER.x, LEVEL_CENTER.z, '#ff4a3d', 7);
+  mctx.fillStyle = '#f2c230'; mctx.strokeStyle = '#111'; mctx.lineWidth = 3;
   mctx.beginPath(); mctx.moveTo(Wd / 2, Wd / 2 - 14); mctx.lineTo(Wd / 2 + 10, Wd / 2 + 10); mctx.lineTo(Wd / 2, Wd / 2 + 5); mctx.lineTo(Wd / 2 - 10, Wd / 2 + 10); mctx.closePath(); mctx.stroke(); mctx.fill();
 }
 
@@ -205,20 +215,20 @@ let mode = 'menu';              // menu | free | level | garage
 let paused = true, inRun = false;
 const playing = () => (mode === 'free' || mode === 'level') && !paused;
 const SCREENS = ['menu', 'levels', 'garage', 'result', 'loading'];
-function show(id) { for (const s of SCREENS) $(s).hidden = s !== id; }
+function show(id) { for (const s of SCREENS) $(s).hidden = s !== id; $('vignette').classList.toggle('off', id !== 'menu' && id !== 'levels'); }
 let toastT;
-function toast(text, ms = 2200) { const t = $('toast'); t.textContent = text; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); }
+function toast(text, ms = 2200, bad = false) { const t = $('toast'); t.textContent = text; t.classList.toggle('bad', bad); t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); }
 function updateMoney() {
-  $('money').textContent = `${fmt(save.money)} сум`;
+  $('money').textContent = fmt(save.money);
   $('menu-money').textContent = `${fmt(save.money)} сум · ${carById(save.car).name}`;
-  $('garage-money').textContent = `На счету ${fmt(save.money)} сум`;
+  $('garage-money').textContent = `${fmt(save.money)} сум на счету`;
 }
 
 function enterPlay(m) {
   mode = m; paused = false; inRun = true;
   show(null); $('hud').hidden = false; $('touch').hidden = !isTouch;
   $('level-panel').hidden = m !== 'level';
-  $('btn-play').firstChild.textContent = 'Продолжить ';
+  $('btn-play').querySelector('span').textContent = 'Дальше';
   updateMoney();
 }
 function openMenu() {
@@ -297,7 +307,7 @@ function finishLevel(res) {
 }
 $('res-retry').onclick = () => startLevel(levels.idx);
 $('res-next').onclick = () => startLevel(levels.idx + 1);
-$('res-menu').onclick = () => { levels.clear(); inRun = false; mode = 'menu'; $('btn-play').firstChild.textContent = 'Поехать '; show('menu'); };
+$('res-menu').onclick = () => { levels.clear(); inRun = false; mode = 'menu'; $('btn-play').querySelector('span').textContent = 'Ехать'; show('menu'); };
 
 // гараж
 let garageSel, garageColor, garageMesh, prevMode;
@@ -320,7 +330,9 @@ function previewGarage() {
 function renderGarage() {
   const tabs = $('car-tabs'); tabs.innerHTML = '';
   for (const c of CARS) {
-    const b = document.createElement('button'); b.textContent = c.name; b.className = c.id === garageSel ? 'on' : '';
+    const b = document.createElement('button'); b.className = c.id === garageSel ? 'on' : '';
+    const own = save.owned.includes(c.id);
+    b.innerHTML = `<span>${c.name}</span><small>${c.id === save.car ? 'за рулём' : own ? 'в гараже' : fmt(c.price) + ' сум'}</small>`;
     b.onclick = () => { garageSel = c.id; garageColor = null; previewGarage(); renderGarage(); };
     tabs.append(b);
   }
@@ -358,6 +370,36 @@ $('btn-buy').onclick = () => {
   persist(); rebuildPlayer(); previewGarage(); renderGarage();
 };
 
+// ---------- Светофоры: подсказка и штраф за красный ----------
+let lastCell = null, fineCooldown = 0;
+function nearestLine(arr, v) { let best = arr[0]; for (const a of arr) if (Math.abs(a - v) < Math.abs(best - v)) best = a; return best; }
+function trafficCheck(dt) {
+  fineCooldown -= dt;
+  const fx = Math.cos(player.h), fz = -Math.sin(player.h);
+  const ns = Math.abs(fz) > Math.abs(fx);
+  const grp = ns ? 'NS' : 'EW';
+  const st = world.signalState?.[grp];
+  // ближайший перекрёсток впереди по ходу движения
+  const X = nearestLine(VLINES.map(v => v.x), player.x + fx * 40), Z = nearestLine(HLINES.map(h => h.z), player.z + fz * 40);
+  const ahead = (X - player.x) * fx + (Z - player.z) * fz;
+  const onLine = ns ? Math.abs(player.x - X) < 16 : Math.abs(player.z - Z) < 16;
+  const centre = Math.hypot(X, Z) < 1;
+  const show = mode === 'free' && st && onLine && !centre && ahead > 0 && ahead < 90;
+  $('signal').hidden = !show;
+  if (show) {
+    for (const c of ['r', 'y', 'g']) $('signal').querySelector('.' + c).classList.toggle('on', c === st);
+    $('signal-t').textContent = world.signalLeft?.[grp] || '';
+  }
+  // въезд на перекрёсток на красный
+  const V = VLINES.find(v => Math.abs(v.x - player.x) < W[v.t] / 2), H = HLINES.find(h => Math.abs(h.z - player.z) < W[h.t] / 2);
+  const cell = V && H && !(V.x === 0 && H.z === 0) ? `${V.x},${H.z}` : null;
+  if (cell && cell !== lastCell && mode === 'free' && Math.abs(player.speed) > 3 && st === 'r' && fineCooldown <= 0) {
+    save.money = Math.max(0, save.money - 50); persist(); updateMoney(); fineCooldown = 4;
+    toast('Проезд на красный: штраф 50 сум', 2600, true);
+  }
+  lastCell = cell;
+}
+
 // ---------- Цикл ----------
 const clock = new THREE.Clock();
 let t = 0, orbit = 0;
@@ -382,6 +424,7 @@ function frame() {
     $('speed').textContent = Math.round(Math.abs(player.speed) * 3.6);
     $('gear').textContent = player.speed < -0.2 ? 'R' : Math.abs(player.speed) < 0.2 ? 'N' : 'D';
     drawMinimap();
+    trafficCheck(dt);
   } else if (mode === 'garage') {
     orbit += dt * 0.3;
     camera.up.set(0, 1, 0);
@@ -393,9 +436,11 @@ function frame() {
   } else if (world) {
     orbit += dt * 0.05;     // в меню камера медленно облетает машину на фоне сквера
     camera.up.set(0, 1, 0);
-    camera.position.set(player.x + Math.cos(orbit) * 16, 5.5, player.z + Math.sin(orbit) * 16);
-    camera.lookAt(player.x, 2.5, player.z);
+    camera.position.set(player.x + Math.cos(orbit) * 13, 3.2, player.z + Math.sin(orbit) * 13);
+    const shift = innerWidth > 720 ? 4.2 : 0;            // машина правее центра: слева меню
+    camera.lookAt(player.x - Math.sin(orbit) * shift, innerWidth > 720 ? 1.4 : 0.2, player.z + Math.cos(orbit) * shift);
   }
+  if (world) world.updateSignals(t);
   audio.update(player ? player.speed : 0, input.up || input.down, input.horn, playing());
   if (player) { sun.position.set(player.x + SUN_OFF.x, SUN_OFF.y, player.z + SUN_OFF.z); sun.target.position.set(player.x, 0, player.z); }
   scene.userData.sky.position.copy(camera.position);
@@ -420,6 +465,8 @@ function frame() {
   $('load-bar').style.width = '100%';
   await nextFrame();
   updateMoney();
+  $('btn-play').classList.add('first');
+  document.querySelectorAll('.nav-item').forEach(b => b.addEventListener('mouseenter', () => $('btn-play').classList.toggle('first', b.id === 'btn-play')));
   show('menu');
   requestAnimationFrame(frame);
   window.__game = { player, world, levels, save, startLevel, startFree, input, camera };

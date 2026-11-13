@@ -125,12 +125,13 @@ function makeTextures() {
     g.fillStyle = '#41505d'; g.fillRect(10, 18, 108, 76);
     g.fillStyle = '#e9e5dc'; for (let x = 10; x < 118; x += 27) g.fillRect(x, 18, 6, 76);
   });
-  T.hotel = facade((g, w, h) => {      // отель «Узбекистан»: белая решётка стрельчатых ячеек
-    g.fillStyle = '#c9cdd0'; g.fillRect(0, 0, w, h);
-    g.fillStyle = '#56636f'; g.fillRect(12, 24, 40, 96); g.fillRect(76, 24, 40, 96);
-    g.strokeStyle = '#f5f2ea'; g.lineWidth = 12;
-    for (const x of [0, 64]) { g.beginPath(); g.moveTo(x + 4, h); g.lineTo(x + 4, 50); g.quadraticCurveTo(x + 4, 8, x + 32, 4); g.quadraticCurveTo(x + 60, 8, x + 60, 50); g.lineTo(x + 60, h); g.stroke(); }
-    g.fillStyle = '#f3f0e8'; g.fillRect(0, 120, w, 8);
+  T.hotel = facade((g, w, h) => {      // отель «Узбекистан»: солнцезащитный экран из прямоугольных бетонных панелей
+    g.fillStyle = '#f1ede3'; g.fillRect(0, 0, w, h);
+    for (const x of [16, 80]) {
+      g.fillStyle = '#7a8894'; g.fillRect(x, 16, 32, 94);
+      g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(x, 16, 5, 94); g.fillRect(x, 16, 32, 5);
+    }
+    g.fillStyle = '#cfc8b8'; g.fillRect(0, 118, w, 10);
   });
   T.house = facade((g, w, h) => {
     g.fillStyle = '#dcc49a'; g.fillRect(0, 0, w, h);
@@ -147,6 +148,10 @@ function makeTextures() {
   });
   T.ribs = canvasTex(256, 64, (g, w, h) => {
     for (let x = 0; x < w; x += 16) { const gr = g.createLinearGradient(x, 0, x + 16, 0); gr.addColorStop(0, '#1d5fa6'); gr.addColorStop(0.5, '#3d8fd0'); gr.addColorStop(1, '#1d5fa6'); g.fillStyle = gr; g.fillRect(x, 0, 16, h); }
+  });
+  T.lattice = canvasTex(64, 64, (g, w, h) => {
+    g.clearRect(0, 0, w, h); g.strokeStyle = '#a9b3bd'; g.lineWidth = 5;
+    g.beginPath(); g.moveTo(0, 0); g.lineTo(w, h); g.moveTo(w, 0); g.lineTo(0, h); g.moveTo(0, 2); g.lineTo(w, 2); g.stroke();
   });
   T.mbrick = canvasTex(128, 128, (g, w, h) => {
     g.fillStyle = '#cfa56a'; g.fillRect(0, 0, w, h);
@@ -176,7 +181,30 @@ function makeMaterials() {
     lightOn: std({ color: 0xfff3cf, emissive: 0xffe2a0, emissiveIntensity: 0.4 }),
     tlRed: std({ color: 0xff3b2f, emissive: 0xff2010, emissiveIntensity: 1.2 }), tlGreen: std({ color: 0x2bd46a, emissive: 0x20c060, emissiveIntensity: 1.2 }),
     tlBody: std({ color: 0x1e2226 }), seats: std({ color: 0xe8e4dc }), field: std({ map: T.grass }),
+    lattice: std({ map: T.lattice, alphaTest: 0.4, transparent: false, side: THREE.DoubleSide, metalness: 0.6, roughness: 0.4 }),
+    shopGlass: std({ color: 0x24313b, metalness: 0.5, roughness: 0.15 }),
+    aryk: std({ map: T.water, roughness: 0.2, polygonOffset: true, polygonOffsetFactor: -1 }),
+    stopRoof: std({ color: 0x2b5ea8 }), stopGlass: std({ color: 0x9fb8c8, transparent: true, opacity: 0.45, roughness: 0.1 }),
   });
+  M.signs = [0xc23a2b, 0x2b5ea8, 0x2e8a4e, 0xe0a92e, 0xf2efe8].map(c => std({ color: c, emissive: c, emissiveIntensity: 0.15 }));
+  M.metro = new THREE.MeshStandardMaterial({ map: canvasTex(128, 128, g => { g.fillStyle = '#1f4fb4'; g.beginPath(); g.arc(64, 64, 62, 0, 7); g.fill(); g.fillStyle = '#fff'; g.font = 'bold 92px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('M', 64, 70); }, false), transparent: true, side: THREE.DoubleSide, emissive: 0xffffff, emissiveIntensity: 0.1 });
+  M.metro.emissiveMap = M.metro.map;
+}
+const SIG_ON = { r: 0xff3b2f, y: 0xffc21a, g: 0x2bff6a }, SIG_OFF = { r: 0x3a1512, y: 0x3a3112, g: 0x123a1c };
+function drawTimer(c, text, color) {
+  const g = c.getContext('2d'); g.fillStyle = '#050505'; g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = color; g.font = 'bold 44px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, c.width / 2, c.height / 2 + 2);
+}
+function makeSignalMaterials(world) {
+  M.signalPole = new THREE.MeshStandardMaterial({ color: 0x5b6168, metalness: 0.6, roughness: 0.45 });
+  M.sig = {}; M.timer = {}; world.timerCanvas = {}; world.timerKey = {};
+  for (const grp of ['NS', 'EW']) {
+    M.sig[grp] = {};
+    for (const c of ['r', 'y', 'g']) M.sig[grp][c] = new THREE.MeshStandardMaterial({ color: SIG_OFF[c], emissive: SIG_ON[c], emissiveIntensity: 0.02, roughness: 0.3 });
+    const cv = document.createElement('canvas'); cv.width = 96; cv.height = 60; world.timerCanvas[grp] = cv;
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    M.timer[grp] = new THREE.MeshBasicMaterial({ map: tex });
+  }
 }
 const FLAT = () => [M.ave, M.st, M.asphalt, M.sidewalk, M.grass, M.dirt, M.plaza, M.lane, M.water, M.zebra, M.field];
 
@@ -187,7 +215,7 @@ export class World {
     this.root = new THREE.Group(); scene.add(this.root);
     this.batches = new Map(); this.carBuckets = new Map();
     this.trees = []; this.lamps = []; this.labels = [];
-    makeTextures(); makeMaterials();
+    makeTextures(); makeMaterials(); makeSignalMaterials(this);
     this.ground(); this.roads(); this.ringAndSquare(); this.canal(); this.cells(); this.mountains();
     this.finish();
   }
@@ -207,15 +235,54 @@ export class World {
   collide(x, z, sx, sz, rot = 0) { this.obstacles.add({ x, z, h: rot, hl: sx / 2, hw: sz / 2 }); }
 
   // Здание: стены с фасадом (тайл 3 м × этаж) и крыша
-  building(x, z, w, d, floors, mat, rot = 0, roof = M.roof, floorH = 3) {
+  building(x, z, w, d, floors, mat, rot = 0, roof = M.roof, floorH = 3, opts = {}) {
     const h = floors * floorH;
     for (const [ox, oz, len, r] of [[0, d / 2, w, 0], [0, -d / 2, w, Math.PI], [w / 2, 0, d, Math.PI / 2], [-w / 2, 0, d, -Math.PI / 2]]) {
       const g = new THREE.PlaneGeometry(len, h);
       const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * Math.max(1, Math.round(len / 3)), uv.getY(i) * floors);
       g.rotateY(r); g.translate(ox, h / 2, oz); g.rotateY(rot); g.translate(x, 0, z); this.push(mat, g);
     }
+    // локальная деталь здания (координаты относительно центра, с учётом поворота)
+    const part = (m, g, lx, ly, lz, ry = 0) => { g.rotateY(ry); g.translate(lx, ly, lz); g.rotateY(rot); g.translate(x, 0, z); this.push(m, g); };
+    // парапет и крыша
     this.box(roof, x, h, z, w + 0.5, 0.7, d + 0.5, rot);
-    if (w * d > 300) this.box(roof, x, h + 0.7, z, 5, 2.4, 4, rot);
+    if (w * d > 300) {
+      part(roof, new THREE.BoxGeometry(5, 2.6, 4), w * 0.2, h + 0.7 + 1.3, 0);                       // машинное отделение лифта
+      part(M.concrete, new THREE.BoxGeometry(1.2, 1.4, 1.2), -w * 0.25, h + 0.7 + 0.7, d * 0.2);    // вентшахта
+      part(M.steel, new THREE.CylinderGeometry(0.04, 0.04, 3, 4), w * 0.2, h + 4.6, 0);              // антенна
+    }
+    const living = [M.panel, M.panel2, M.brick, M.office].includes(mat);
+    if (living && floors >= 3) {
+      const long = w >= d, L = long ? w : d, D = long ? d : w;
+      const side = (Math.floor(x * 7 + z * 3) & 1) ? 1 : -1;
+      // подъезды с козырьками и дверями
+      const n = Math.max(1, Math.floor(L / 18));
+      for (let k = 0; k < n; k++) {
+        const t = -L / 2 + (k + 0.5) * (L / n);
+        const [lx, lz, ry] = long ? [t, side * (D / 2), 0] : [side * (D / 2), t, Math.PI / 2];
+        const out = 0.9;
+        const ox = long ? 0 : side * out, oz = long ? side * out : 0;
+        part(M.concrete, new THREE.BoxGeometry(2.8, 0.18, 1.8), lx + ox, 2.7, lz + oz, ry);
+        part(M.darkSteel, new THREE.BoxGeometry(1.4, 2.3, 0.1), lx + (long ? 0 : side * 0.06), 1.15, lz + (long ? side * 0.06 : 0), ry);
+        part(M.concrete, new THREE.BoxGeometry(2.8, 0.25, 1.8), lx + ox, 0.12, lz + oz, ry);
+      }
+      // кондиционеры на фасадах
+      const ac = Math.floor(L * floors / 40);
+      for (let k = 0; k < ac; k++) {
+        const t = rr(-L / 2 + 1, L / 2 - 1), fl = Math.floor(rr(1, floors)), sd = rnd() < 0.5 ? 1 : -1;
+        const [lx, lz] = long ? [t, sd * (D / 2 + 0.25)] : [sd * (D / 2 + 0.25), t];
+        part(M.white, new THREE.BoxGeometry(long ? 0.8 : 0.4, 0.55, long ? 0.4 : 0.8), lx, fl * floorH + 0.9, lz);
+      }
+      // магазины на первом этаже: витрины и вывески
+      if (opts.shops) {
+        const sd = -side;
+        for (let t = -L / 2 + 3; t < L / 2 - 3; t += 6.5) {
+          const [lx, lz, ry] = long ? [t, sd * (D / 2 + 0.06), 0] : [sd * (D / 2 + 0.06), t, Math.PI / 2];
+          part(M.shopGlass, new THREE.BoxGeometry(5.4, 2.4, 0.08), lx, 1.3, lz, ry);
+          part(pick(M.signs), new THREE.BoxGeometry(5, 0.7, 0.25), lx + (long ? 0 : sd * 0.12), 3.0, lz + (long ? sd * 0.12 : 0), ry);
+        }
+      }
+    }
     this.collide(x, z, w, d, rot);
   }
 
@@ -256,7 +323,8 @@ export class World {
       const wx = W[V.t], wz = W[H.t];
       this.quad(M.asphalt, V.x, 0.06, H.z, wx + 2 * SW, wz + 2 * SW, 0, (wx + 2 * SW) / 12, (wz + 2 * SW) / 12);
       for (const sx of [-1, 1]) for (const sz of [-1, 1]) this.quad(M.sidewalk, V.x + sx * (wx / 2 + SW / 2), 0.1, H.z + sz * (wz / 2 + SW / 2), SW, SW, 0, 1.5, 1.5);
-      if (V.t === 'ave' || H.t === 'ave') for (const [sx, sz] of [[1, 1], [-1, -1]]) this.trafficLight(V.x + sx * (wx / 2 + 1.5), H.z + sz * (wz / 2 + 1.5), sx > 0 ? 0 : Math.PI);
+      if ((V.x === 0 || H.z === 0) && V.t !== H.t) this.metroSign(V.x + wx / 2 + SW - 1, H.z - wz / 2 - SW + 1);
+      for (const [dx, dz] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) this.signal(V.x, H.z, dx, dz, dz ? wx / 2 : wz / 2, dz ? wz / 2 : wx / 2);
     }
   }
 
@@ -286,6 +354,10 @@ export class World {
         this.trees.push({ x: tx, z: tz, s: rr(0.85, 1.25), kind: 'chinar' });
       }
       if (t === 'st') for (let v = -len / 2 + 18; v < len / 2 - 6; v += 36) { const [lx, lz] = at(s * (w / 2 + 0.8), v); this.lamps.push({ x: lx, z: lz, side: s, rot: dir === 'v' ? 0 : -Math.PI / 2 }); }
+      // арык вдоль тротуара — ташкентская примета
+      const [ax, az] = at(s * (w / 2 + SW - 0.45), 0); this.quad(M.aryk, ax, 0.1, az, 0.6, len - 2, rot, 1, len / 8);
+      // остановка на проспектах
+      if (t === 'ave' && len > 90) { const [bx, bz] = at(s * (w / 2 + 2.4), s * 20); this.busStop(bx, bz, dir === 'v' ? (s > 0 ? -Math.PI / 2 : Math.PI / 2) : (s > 0 ? 0 : Math.PI)); }
     }
     for (const [ok, sgn] of [[zebraA, -1], [zebraB, 1]]) {
       if (!ok) continue;
@@ -294,11 +366,73 @@ export class World {
     }
   }
 
-  trafficLight(x, z, rot) {
-    this.box(M.tlBody, x, 0, z, 0.18, 4.2, 0.18, 0, true);
-    this.box(M.tlBody, x, 3.2, z, 0.5, 1.3, 0.4, rot);
-    this.geo(M.tlRed, new THREE.SphereGeometry(0.14, 10, 8), x + Math.cos(rot) * 0.22, 4.2, z - Math.sin(rot) * 0.22);
-    this.geo(M.tlGreen, new THREE.SphereGeometry(0.14, 10, 8), x + Math.cos(rot) * 0.22, 3.45, z - Math.sin(rot) * 0.22);
+  // Остановка: стеклянный павильон с синей крышей, скамья и табличка
+  busStop(x, z, face) {
+    const part = (m, g, lx, ly, lz) => { g.translate(lx, ly, lz); g.rotateY(face); g.translate(x, 0, z); this.push(m, g); };
+    part(M.stopRoof, new THREE.BoxGeometry(5, 0.15, 2.2), 0, 2.7, 0);
+    part(M.stopGlass, new THREE.BoxGeometry(5, 2.3, 0.06), 0, 1.4, -1);
+    for (const sx of [-2.4, 2.4]) part(M.darkSteel, new THREE.BoxGeometry(0.1, 2.7, 0.1), sx, 1.35, -1);
+    part(M.wood, new THREE.BoxGeometry(3.5, 0.1, 0.5), 0, 0.5, -0.65);
+    part(M.darkSteel, new THREE.BoxGeometry(0.08, 2.6, 0.08), 3, 1.3, 0.6);
+    part(M.stopRoof, new THREE.BoxGeometry(0.7, 0.5, 0.05), 3, 2.6, 0.6);
+    this.obstacles.add({ x, z, h: face, hl: 2.5, hw: 1.1 });
+  }
+
+  metroSign(x, z) {
+    this.geo(M.darkSteel, new THREE.CylinderGeometry(0.08, 0.08, 3.6, 6), x, 1.8, z);
+    for (const r of [0, Math.PI / 2]) this.geo(M.metro, new THREE.CircleGeometry(0.6, 24), x, 3.9, z, r);
+    this.collide(x, z, 0.3, 0.3);
+  }
+
+  // Светофор для подъезда к перекрёстку (cx, cz) с направлением движения (dx, dz).
+  // Столб справа перед перекрёстком, консоль над полосами, вторая секция на столбе и табло с отсчётом.
+  signal(cx, cz, dx, dz, laneHalf, crossHalf) {
+    const group = dz ? 'NS' : 'EW';
+    const rx = -dz, rz = dx;                                   // вправо от направления движения
+    const px = cx - dx * (crossHalf + 2) + rx * (laneHalf + 1.2), pz = cz - dz * (crossHalf + 2) + rz * (laneHalf + 1.2);
+    const face = Math.atan2(-dx, -dz);                         // лицевая сторона смотрит на подъезжающих
+    const arm = laneHalf * 0.7;
+    this.geo(M.signalPole, new THREE.CylinderGeometry(0.11, 0.14, 6.2, 8), px, 3.1, pz);
+    const ag = new THREE.BoxGeometry(0.12, 0.12, arm); ag.translate(0, 0, arm / 2); ag.rotateY(Math.atan2(-rx, -rz));
+    ag.translate(px, 5.9, pz); this.push(M.signalPole, ag);
+    this.collide(px, pz, 0.3, 0.3);
+    const head = (hx, hy, hz, withTimer) => {
+      const add = (mat, g, lx, ly, lz) => { g.translate(lx, ly, lz); this.geo(mat, g, hx, hy, hz, face); };
+      add(M.tlBody, new THREE.BoxGeometry(0.42, 1.18, 0.3), 0, 0, 0);
+      add(M.tlBody, new THREE.BoxGeometry(0.62, 1.4, 0.04), 0, 0, -0.17);           // экран-подложка
+      [['r', 0.36], ['y', 0], ['g', -0.36]].forEach(([c, ly]) => {
+        add(M.sig[group][c], new THREE.CircleGeometry(0.13, 16), 0, ly, 0.152);
+        add(M.tlBody, new THREE.CylinderGeometry(0.16, 0.16, 0.16, 12, 1, true, -Math.PI / 2, Math.PI).rotateX(Math.PI / 2), 0, ly + 0.02, 0.22);  // козырёк
+      });
+      if (withTimer) {
+        add(M.tlBody, new THREE.BoxGeometry(0.5, 0.34, 0.12), 0, -0.88, 0.02);
+        add(M.timer[group], new THREE.PlaneGeometry(0.44, 0.28), 0, -0.88, 0.085);
+      }
+    };
+    head(px - rx * arm, 5.25, pz - rz * arm, false);
+    head(px + dx * 0.05, 2.9, pz + dz * 0.05, true);
+    // стоп-линия на правой половине дороги
+    const slx = cx - dx * (crossHalf + 11) + rx * laneHalf / 2, slz = cz - dz * (crossHalf + 11) + rz * laneHalf / 2;
+    this.quad(M.white, slx, 0.072, slz, dz ? laneHalf - 1 : 0.45, dz ? 0.45 : laneHalf - 1, 0, 1, 1);
+  }
+
+  // Фазы: 0–14 с зелёный север–юг, 3 с жёлтый, 1 с всем красный, затем то же для восток–запад
+  updateSignals(t) {
+    const T = 36, p = t % T;
+    const state = q => (q < 14 ? 'g' : q < 17 ? 'y' : 'r');
+    for (const [grp, q] of [['NS', p], ['EW', (p + 18) % T]]) {
+      const st = state(q);
+      for (const c of ['r', 'y', 'g']) {
+        const m = M.sig[grp][c], on = c === st;
+        m.emissiveIntensity = on ? 2.4 : 0.02;
+        m.color.setHex(on ? SIG_ON[c] : SIG_OFF[c]);
+      }
+      const left = st === 'g' ? Math.ceil(14 - q) : st === 'r' ? Math.ceil(T - q) : 0;
+      (this.signalLeft ||= {})[grp] = st === 'y' ? '' : String(left);
+      const key = st + left;
+      if (this.timerKey[grp] !== key) { this.timerKey[grp] = key; drawTimer(this.timerCanvas[grp], st === 'y' ? '' : String(left).padStart(2, '0'), st === 'g' ? '#3cff7a' : '#ff3b2f'); M.timer[grp].map.needsUpdate = true; }
+    }
+    this.signalState = { NS: state(p), EW: state((p + 18) % T) };
   }
 
   // ---------- сквер Амира Темура и кольцо ----------
@@ -432,7 +566,7 @@ export class World {
       while (pos < len / 2 - 15) {
         const bl = Math.min(rr(24, 46), len / 2 - pos), off = pos + bl / 2;
         const bx = rot ? x : x + off, bz = rot ? z + off : z;
-        if (!this.inRing(bx, bz, 30)) this.building(bx, bz, rot ? dep : bl, rot ? bl : dep, Math.floor(rr(4, 7)), pick(mats));
+        if (!this.inRing(bx, bz, 30)) this.building(bx, bz, rot ? dep : bl, rot ? bl : dep, Math.floor(rr(4, 7)), pick(mats), 0, M.roof, 3, { shops: true });
         pos += bl + rr(6, 12);
       }
     }
@@ -526,6 +660,13 @@ export class World {
     for (let a = 0; a < 32; a++) { const ang = (a / 32) * Math.PI * 2; this.geo(M.white, new THREE.CylinderGeometry(0.5, 0.5, 15, 8), x + Math.cos(ang) * 19.6, 7.5, z + Math.sin(ang) * 19.6); }
     this.geo(M.ribs, uvs(new THREE.SphereGeometry(15, 48, 16, 0, Math.PI * 2, 0, Math.PI / 2), 3, 1), x, 15, z, 0, 1, 1.15, 1);
     this.geo(M.gold, new THREE.SphereGeometry(1.2, 16, 12), x, 33, z);
+    this.geo(M.gold, new THREE.CylinderGeometry(0.15, 0.4, 3, 8), x, 35, z);
+    for (let a = 0; a < 16; a++) {   // высокие арочные окна между колоннами
+      const ang = (a / 16) * Math.PI * 2 + 0.1;
+      const g = new THREE.PlaneGeometry(2.4, 10); g.translate(0, 7, 0); g.rotateY(-ang + Math.PI / 2); g.translate(x + Math.cos(ang) * 19.05, 0, z + Math.sin(ang) * 19.05); this.push(M.shopGlass, g);
+    }
+    this.geo(M.tiles, uvs(new THREE.CylinderGeometry(19.3, 19.3, 1.2, 48, 1, true), 24, 1), x, 15.6, z);   // майоликовый пояс
+    this.box(M.white, x + 20, 0, z + 6, 8, 12, 14);                              // портик входа
     this.collide(x, z, 38, 38);
     this.labels.push({ x, z, text: 'Музей Темуридов' });
     const cx = r.x0 + 18, cz = r.z1 - 26;
@@ -539,25 +680,56 @@ export class World {
     this.yardTrees(r, 10);
   }
 
-  hotel() {         // отель «Узбекистан»: вогнутый фасад к скверу, 17 этажей
+  hotel() {         // отель «Узбекистан» (1974): плавно изогнутый 17-этажный корпус с экраном, стилобат, козырёк
     const R = 122;
-    for (let k = 0; k < 7; k++) {
-      const th = -1.05 + k * 0.087;
-      this.building(Math.cos(th) * R, Math.sin(th) * R, 11, 16, 17, M.hotel, -th - Math.PI / 2, M.roofDark);
+    for (let k = 0; k < 9; k++) {
+      const th = -1.08 + k * 0.071;
+      this.building(Math.cos(th) * R, Math.sin(th) * R, 8.9, 17, 17, M.hotel, -th - Math.PI / 2, M.roofDark);
     }
+    for (let k = 0; k < 9; k++) {      // стилобат: два этажа стекла, шире корпуса
+      const th = -1.08 + k * 0.071, rr2 = R - 6;
+      this.box(M.office, Math.cos(th) * rr2, 0, Math.sin(th) * rr2, 9, 6.5, 12, -th - Math.PI / 2, true);
+      this.box(M.white, Math.cos(th) * rr2, 6.5, Math.sin(th) * rr2, 9.2, 0.6, 12.4, -th - Math.PI / 2);
+    }
+    const th0 = -0.79;
+    this.box(M.white, Math.cos(th0) * (R - 15), 4, Math.sin(th0) * (R - 15), 14, 0.5, 7, -th0 - Math.PI / 2);   // козырёк входа
+    for (const s2 of [-1, 1]) this.box(M.white, Math.cos(th0 + s2 * 0.045) * (R - 17.5), 0, Math.sin(th0 + s2 * 0.045) * (R - 17.5), 0.5, 4, 0.5, 0, true);
+    this.sign(Math.cos(th0) * (R - 8.7), 53.5, Math.sin(th0) * (R - 8.7), 'UZBEKISTAN', '#1f2a33', 22, Math.atan2(-Math.cos(th0), -Math.sin(th0)));
     this.labels.push({ x: 86, z: -86, text: 'Отель «Узбекистан»' });
   }
 
-  forums(r) {       // Дворец форумов
-    const x = r.x1 - 40, z = r.z1 - 36;
-    this.box(M.white, x, 0, z, 66, 2, 50);
-    this.box(M.white, x, 2, z, 56, 18, 40, 0, true);
-    for (let k = 0; k <= 16; k++) for (const s of [-1, 1]) this.geo(M.white, new THREE.CylinderGeometry(0.7, 0.7, 20, 10), x - 30 + k * (60 / 16), 12, z + s * 22.5);
-    for (let k = 1; k < 12; k++) for (const s of [-1, 1]) this.geo(M.white, new THREE.CylinderGeometry(0.7, 0.7, 20, 10), x + s * 30, 12, z - 22.5 + k * (45 / 12));
-    this.box(M.white, x, 22, z, 64, 1.6, 48);
-    this.geo(M.tiles, uvs(new THREE.SphereGeometry(12, 40, 14, 0, Math.PI * 2, 0, Math.PI / 2), 10, 3), x, 23.6, z, 0, 1, 0.8, 1);
-    this.geo(M.gold, new THREE.SphereGeometry(0.9, 12, 10), x, 33.5, z);
-    this.collide(x, z, 66, 50);
+  // Аисты (символ Мустакиллик и Дворца форумов)
+  stork(x, y, z, rot, mat, k = 1) {
+    const part = (g, lx, ly, lz, rx = 0, rz = 0) => { g.scale(k, k, k); g.rotateX(rx); g.rotateZ(rz); g.translate(lx * k, ly * k, lz * k); g.rotateY(rot); g.translate(x, y, z); this.push(mat, g); };
+    part(new THREE.SphereGeometry(0.55, 14, 10).scale(1.6, 0.8, 0.8), 0, 0, 0);
+    part(new THREE.CylinderGeometry(0.1, 0.16, 1.4, 8), 0.95, 0.6, 0, 0, -0.6);
+    part(new THREE.SphereGeometry(0.2, 10, 8), 1.35, 1.25, 0);
+    part(new THREE.ConeGeometry(0.07, 0.8, 6), 1.75, 1.2, 0, 0, -Math.PI / 2 - 0.2);
+    for (const s2 of [-1, 1]) part(new THREE.BoxGeometry(1.5, 0.06, 1.6), -0.1, 0.55, s2 * 0.95, s2 * 0.5, 0);   // поднятые крылья
+    part(new THREE.CylinderGeometry(0.04, 0.04, 1.2, 5), -0.1, -0.85, 0.15);
+    part(new THREE.CylinderGeometry(0.04, 0.04, 1.2, 5), 0.1, -0.85, -0.15);
+  }
+
+  forums(r) {       // Дворец форумов (2009): колоннада по периметру, купол высотой 48 м, на вершине гнездо с тремя аистами
+    const x = r.x1 - 42, z = r.z1 - 40;
+    const W2 = 62, D2 = 48, H = 22;
+    this.box(M.white, x, 0, z, W2 + 10, 1.6, D2 + 10);                         // стилобат и ступени
+    this.box(M.white, x, 0, z + D2 / 2 + 6, W2 * 0.6, 0.8, 4);
+    this.box(M.shopGlass, x, 1.6, z, W2 - 6, H - 2, D2 - 6, 0, true);          // стеклянные стены за колоннами
+    const col = (cx, cz) => {
+      this.geo(M.white, new THREE.CylinderGeometry(0.75, 0.85, H - 2.4, 16), cx, 1.6 + (H - 2.4) / 2, cz);
+      this.geo(M.white, new THREE.BoxGeometry(2, 0.6, 2), cx, H - 0.5, cz);    // капитель
+      this.geo(M.white, new THREE.BoxGeometry(1.8, 0.5, 1.8), cx, 1.85, cz);   // база
+    };
+    for (let k = 0; k <= 15; k++) for (const s2 of [-1, 1]) col(x - W2 / 2 + k * (W2 / 15), z + s2 * D2 / 2);
+    for (let k = 1; k < 11; k++) for (const s2 of [-1, 1]) col(x + s2 * W2 / 2, z - D2 / 2 + k * (D2 / 11));
+    this.box(M.white, x, H, z, W2 + 4, 2.2, D2 + 4);                           // антаблемент
+    this.box(M.tiles, x, H + 2.2, z, W2 + 3, 0.5, D2 + 3);
+    this.geo(M.white, new THREE.CylinderGeometry(19, 20, 5, 48), x, H + 5, z);  // барабан
+    this.geo(M.tiles, uvs(new THREE.SphereGeometry(19, 48, 18, 0, Math.PI * 2, 0, Math.PI / 2), 16, 4), x, H + 7.5, z, 0, 1, 0.95, 1);
+    this.geo(M.gold, new THREE.CylinderGeometry(1.8, 2.4, 1.2, 16), x, 48.2, z);
+    for (let k = 0; k < 3; k++) this.stork(x + Math.cos(k * 2.1) * 1.2, 50.2, z + Math.sin(k * 2.1) * 1.2, k * 2.1, M.gold, 1.2);
+    this.collide(x, z, W2 + 6, D2 + 6);
     this.labels.push({ x, z, text: 'Дворец форумов' });
   }
 
@@ -578,11 +750,9 @@ export class World {
     for (let k = 0; k < 16; k++) this.geo(M.white, new THREE.CylinderGeometry(0.75, 0.9, 17, 12), ax, 8.5, az - 33 + k * 4.4);
     this.box(M.white, ax, 17, az, 4, 2.2, 70);
     this.box(M.white, ax, 19.2, az, 3.2, 0.6, 66);
-    for (let k = 0; k < 4; k++) {
-      const z = az - 24 + k * 16;
-      this.geo(M.white, new THREE.CapsuleGeometry(0.6, 1.4, 4, 8), ax, 21.8, z);
-      this.geo(M.white, new THREE.ConeGeometry(0.5, 3.6, 3), ax, 22, z, 0, 0.2, 1, 1.6);
-    }
+    this.box(M.tiles, ax, 17.8, az, 4.1, 0.7, 70.2);                             // орнаментальный пояс
+    for (let k = 0; k < 16; k++) this.box(M.white, ax, 16.4, az - 33 + k * 4.4, 2.2, 0.6, 2.2);   // капители
+    for (let k = 0; k < 4; k++) this.stork(ax, 21.6, az - 24 + k * 16, Math.PI / 2 + (k % 2 ? 0.4 : -0.4), M.white, 1.5);
     for (let k = 0; k < 16; k++) this.collide(ax, az - 33 + k * 4.4, 1.8, 1.8);
     this.labels.push({ x: ax, z: az, text: 'Арка Эзгулик' });
     this.quad(M.plaza, r.cx - 6, 0.1, r.cz, r.w - 22, 16, 0, 6, 2);
@@ -632,22 +802,32 @@ export class World {
     this.yardTrees(r, 12);
   }
 
-  tvTower(r) {      // телебашня
+  tvTower(r) {      // телебашня (1985): 375 м, три конические опоры по 93 м, смотровая площадка 97 м, ресторан выше
     const x = r.cx, z = r.cz;
     for (let k = 0; k < 3; k++) {
-      const a = (k / 3) * Math.PI * 2 + 0.3;
-      const g = new THREE.CylinderGeometry(0.9, 1.6, 64, 8); g.translate(0, 32, 0); g.rotateZ(0.28); g.rotateY(-a); g.translate(x + Math.cos(a) * 18, 0, z + Math.sin(a) * 18); this.push(M.steel, g);
-      this.collide(x + Math.cos(a) * 18, z + Math.sin(a) * 18, 3.5, 3.5);
+      const a = (k / 3) * Math.PI * 2 + 0.3, R0 = 34;
+      const bx = x + Math.cos(a) * R0, bz = z + Math.sin(a) * R0;
+      const len = Math.hypot(R0 - 4, 93), tilt = Math.atan2(R0 - 4, 93);
+      const g = new THREE.CylinderGeometry(1.6, 4.2, len, 16); g.translate(0, len / 2, 0);
+      g.rotateZ(tilt); g.rotateY(-a); g.translate(bx, 0, bz); this.push(M.steel, g);
+      this.geo(M.concrete, new THREE.CylinderGeometry(7.5, 7.5, 1.5, 24), bx, 0.75, bz);
+      this.collide(bx, bz, 12, 12);
     }
-    this.geo(M.steel, new THREE.CylinderGeometry(2.2, 4.5, 190, 16), x, 95, z);
-    for (let y = 8; y < 180; y += 8) this.geo(M.darkSteel, new THREE.CylinderGeometry(4.6 - y * 0.012, 4.6 - y * 0.012, 0.5, 16), x, y, z);
-    this.geo(M.glass, new THREE.CylinderGeometry(11, 9, 8, 24), x, 96, z);
-    this.geo(M.darkSteel, new THREE.CylinderGeometry(12, 12, 1.2, 24), x, 101, z);
-    this.geo(M.glass, new THREE.CylinderGeometry(8, 7, 6, 24), x, 120, z);
-    this.geo(M.steel, new THREE.CylinderGeometry(0.4, 1.2, 50, 8), x, 210, z);
-    this.box(M.concrete, x, 0, z, 14, 6, 14, 0, true);
+    this.geo(M.lattice, uvs(new THREE.CylinderGeometry(3.2, 6.5, 240, 24, 1, true), 8, 60), x, 120, z);   // решётчатый ствол
+    this.geo(M.darkSteel, new THREE.CylinderGeometry(1.8, 2.6, 240, 12), x, 120, z);                      // шахта лифтов
+    for (let y = 10; y < 240; y += 12) this.geo(M.steel, new THREE.TorusGeometry(6.5 - y * 0.0137, 0.18, 6, 24).rotateX(Math.PI / 2), x, y, z);
+    // смотровая площадка 97 м и ресторан 98–104 м
+    this.geo(M.steel, new THREE.CylinderGeometry(13, 9, 3, 32), x, 95, z);
+    this.geo(M.glass, new THREE.CylinderGeometry(12.4, 12.4, 3.2, 32), x, 98.1, z);
+    this.geo(M.steel, new THREE.CylinderGeometry(13.5, 13.5, 0.8, 32), x, 100, z);
+    this.geo(M.glass, new THREE.CylinderGeometry(11.6, 12.6, 4.5, 32), x, 102.6, z);
+    this.geo(M.steel, new THREE.CylinderGeometry(8, 12.6, 3, 32), x, 106.3, z);
+    this.geo(M.steel, new THREE.CylinderGeometry(5.5, 5.5, 3, 24), x, 180, z);                            // техническая площадка
+    this.geo(M.steel, new THREE.CylinderGeometry(0.6, 2.2, 135, 10), x, 240 + 67.5, z);                   // антенна до 375 м
+    for (const y of [260, 300, 340, 372]) this.geo(M.red, new THREE.SphereGeometry(0.9, 8, 6), x, y, z);  // заградительные огни
+    this.box(M.concrete, x, 0, z, 16, 8, 16, 0, true);
     this.labels.push({ x, z, text: 'Телебашня' });
-    for (let k = 0; k < 40; k++) { const a = rnd() * 7, d = rr(28, 50); this.trees.push({ x: x + Math.cos(a) * d, z: z + Math.sin(a) * d, s: rr(0.9, 1.3), kind: 'poplar' }); }
+    for (let k = 0; k < 40; k++) { const a = rnd() * 7, d = rr(44, 56); this.trees.push({ x: x + Math.cos(a) * d, z: z + Math.sin(a) * d, s: rr(0.9, 1.3), kind: 'poplar' }); }
   }
 
   madrasa(x, z, w, faceRot = 0) {
@@ -678,6 +858,10 @@ export class World {
     this.geo(M.white, new THREE.CylinderGeometry(38, 38, 9, 64), x, 4.5, z);
     this.geo(M.tiles, uvs(new THREE.SphereGeometry(36, 64, 18, 0, Math.PI * 2, 0, Math.PI / 2), 28, 6), x, 9, z, 0, 1, 0.55, 1);
     this.geo(M.gold, new THREE.CylinderGeometry(4, 4, 2, 24), x, 29, z);
+    for (let a = 0; a < 28; a++) {       // аркада по кругу
+      const ang = (a / 28) * Math.PI * 2;
+      const g = new THREE.PlaneGeometry(4.6, 6); g.translate(0, 3, 0); g.rotateY(-ang + Math.PI / 2); g.translate(x + Math.cos(ang) * 38.05, 0, z + Math.sin(ang) * 38.05); this.push(M.shopGlass, g);
+    }
     for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; this.geo(M.tiles, new THREE.SphereGeometry(5, 20, 8, 0, Math.PI * 2, 0, Math.PI / 2), x + Math.cos(a) * 30, 9, z + Math.sin(a) * 30); }
     for (let a = 0; a < 16; a++) { const ang = (a / 16) * Math.PI * 2; this.obstacles.add({ x: x + Math.cos(ang) * 34, z: z + Math.sin(ang) * 34, h: -ang, hl: 4, hw: 7 }); }
     this.obstacles.add({ x, z, h: 0, hl: 30, hw: 30 });

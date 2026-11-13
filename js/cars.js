@@ -279,7 +279,8 @@ export async function loadCarModels() {
 
 function prepareTemplate(spec, scene) {
   const inner = new THREE.Group(); inner.add(scene); inner.rotation.y = spec.rotY;
-  const wrap = new THREE.Group(); wrap.add(inner);
+  const body = new THREE.Group(); body.add(inner); body.userData.body = true;   // кузов отдельно — для крена и клевка
+  const wrap = new THREE.Group(); wrap.add(body);
   wrap.updateMatrixWorld(true);
   let box = new THREE.Box3().setFromObject(wrap);
   const size = box.getSize(new THREE.Vector3());
@@ -343,14 +344,15 @@ export function buildCarMesh(spec, colorHex, plate) {
   const t = templates.get(spec.id);
   if (!t) return buildProcCar(spec, colorHex, plate);
   const group = t.wrap.clone(true);
-  const wheels = [];
+  const wheels = []; let body = null;
   group.traverse(o => {
     if (o.isMesh && o.userData.paint) o.material = paintMaterial(o.material, colorHex);
     if (o.userData.wheel) wheels.push({ pivot: o, front: o.userData.wheel.front, single: true });
+    if (o.userData.body) body = o;
   });
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(spec.len + 0.5, spec.wid + 0.5), shadowMat);
   shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.03; group.add(shadow);
-  group.userData = { wheels, lights: { brake: [] } };
+  group.userData = { wheels, body, lights: { brake: [] } };
   return group;
 }
 const shadowMat = new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: 0.32, depthWrite: false });
