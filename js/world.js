@@ -260,6 +260,7 @@ function makeMaterials() {
     panel: std({ map: T.panel, normalMap: normalFrom(T.panel, 5) }), panel2: std({ map: T.panel2, normalMap: normalFrom(T.panel2, 5) }), brick: std({ map: T.brick, normalMap: normalFrom(T.brick, 4) }), glass: std({ map: T.glass, roughness: 0.25, metalness: 0.4 }),
     panelPeach: std({ map: T.panelPeach, normalMap: normalFrom(T.panelPeach, 5) }), panelBlue: std({ map: T.panelBlue, normalMap: normalFrom(T.panelBlue, 5) }), panelYellow: std({ map: T.panelYellow, normalMap: normalFrom(T.panelYellow, 5) }),
     modernA: std({ map: T.modernA, normalMap: normalFrom(T.modernA, 4), roughness: 0.5 }), modernB: std({ map: T.modernB, normalMap: normalFrom(T.modernB, 4), roughness: 0.5 }), modernC: std({ map: T.modernC, normalMap: normalFrom(T.modernC, 4), roughness: 0.5 }),
+    mesh: std({ map: T.lattice, color: 0xc8ccd2, metalness: 0.8, roughness: 0.35 }),
     redBrick: std({ map: T.redBrick, normalMap: normalFrom(T.redBrick, 4) }), crane: std({ color: 0xf2b705, metalness: 0.4, roughness: 0.5 }), fenceBlue: std({ color: 0x2f5fa8, metalness: 0.5, roughness: 0.5 }),
     rug: std({ color: 0xa42a2a }), track: std({ color: 0xb4543c }), court: std({ color: 0x3b7a5a }), rail: std({ color: 0x6b6f75, metalness: 0.7, roughness: 0.4 }),
     office: std({ map: T.office, normalMap: normalFrom(T.office, 5) }), hotel: std({ map: T.hotel, normalMap: normalFrom(T.hotel, 6), roughness: 0.6 }), house: std({ map: T.house, normalMap: normalFrom(T.house, 3) }),
@@ -785,7 +786,8 @@ export class World {
       '4,3': 'museum', '5,3': 'hotel', '5,4': 'forums', '4,4': 'sayilgoh',
       '3,3': 'mustaqillik', '2,3': 'senate', '2,2': 'tashkentCity', '3,2': 'cityPark',
       '3,1': 'minor', '5,0': 'tvTower', '0,3': 'chorsu', '0,4': 'kukeldash', '0,1': 'khastImam',
-      '1,6': 'stadium', '6,6': 'park', '7,6': 'autodrom', '5,5': 'park', '8,4': 'gas',
+      '1,6': 'stadium', '6,6': 'boburPark', '7,6': 'autodrom', '5,5': 'ecopark', '8,4': 'gas',
+      '1,2': 'tcBoulevard', '2,1': 'tcCongress', '1,1': 'tcMall', '2,6': 'navoiPark', '4,1': 'japaneseGarden', '3,4': 'gafurGulom', '3,5': 'ankhorPark', '8,1': 'botanical', '7,2': 'megaPlanet', '1,5': 'samarqandDarvoza',
       '4,5': 'navoiTheatre', '1,3': 'circus', '6,0': 'shahidlar', '7,1': 'humoArena', '6,7': 'railway', '5,6': 'magicCity',
     };
     const pools = {
@@ -813,7 +815,7 @@ export class World {
   }
 
   groundFor(r, type) {
-    const mat = { mahalla: M.dirt, mosqueBlock: M.dirt, choyxona: M.dirt, autodrom: M.asphalt, gas: M.asphalt, supermarket: M.asphalt, railway: M.plaza, navoiTheatre: M.plaza, circus: M.plaza, humoArena: M.plaza, construction: M.dirt, garages: M.dirt, chorsu: M.plaza, khastImam: M.plaza, kukeldash: M.plaza, sayilgoh: M.plaza, tashkentCity: M.plaza, forums: M.plaza, hotel: M.plaza }[type] || M.grass;
+    const mat = { tcBoulevard: M.plaza, tcCongress: M.plaza, tcMall: M.asphalt, megaPlanet: M.asphalt, samarqandDarvoza: M.asphalt, mahalla: M.dirt, mosqueBlock: M.dirt, choyxona: M.dirt, autodrom: M.asphalt, gas: M.asphalt, supermarket: M.asphalt, railway: M.plaza, navoiTheatre: M.plaza, circus: M.plaza, humoArena: M.plaza, construction: M.dirt, garages: M.dirt, chorsu: M.plaza, khastImam: M.plaza, kukeldash: M.plaza, sayilgoh: M.plaza, tashkentCity: M.plaza, forums: M.plaza, hotel: M.plaza }[type] || M.grass;
     if (Math.abs(r.cx) < 140 && Math.abs(r.cz) < 160) {      // кварталы у кольца: контур квартала с дугой по краю тротуара кольца
       const R = RING_OUT + SW;
       const ix = Math.abs(r.x0) < Math.abs(r.x1) ? r.x0 : r.x1, ox = ix === r.x0 ? r.x1 : r.x0;
@@ -1054,18 +1056,204 @@ export class World {
     this.yardTrees(r, 14);
   }
 
-  tashkentCity(r) {
-    for (const [fx, fz, w, d, fl] of [[0.3, 0.32, 24, 24, 51], [0.74, 0.3, 22, 22, 30], [0.3, 0.78, 20, 20, 24], [0.74, 0.76, 22, 18, 35]])
-      this.building(r.x0 + r.w * fx, r.z0 + r.d * fz, w, d, fl, M.glass, 0, M.roofDark, 3.6);
-    this.geo(M.steel, new THREE.CylinderGeometry(0.4, 0.6, 20, 8), r.x0 + r.w * 0.3, 51 * 3.6 + 10, r.z0 + r.d * 0.32);
+  // ---------- Tashkent City ----------
+  tashkentCity(r) {  // башни: NEST ONE (51 эт.), Hilton (21 эт.), JW Marriott, Ritz-Carlton (136 м, стальной экзоскелет)
+    const xa = r.x0 + 18, xb = r.x1 - 18, za = r.z0 + 26, zb = r.z1 - 30;
+    // NEST ONE: стеклянная башня со ступенчатым верхом и шпилем
+    this.building(xa, zb, 24, 24, 44, M.glass, 0, M.roofDark, 3.6);
+    this.building(xa, zb, 18, 18, 51, M.glass, 0, M.roofDark, 3.6);
+    this.geo(M.steel, new THREE.CylinderGeometry(0.3, 0.7, 26, 8), xa, 51 * 3.6 + 13, zb);
+    this.sign(xa, 51 * 3.6 - 6, zb + 9.1, 'NEST ONE', '#13202c', 12);
+    // Hilton: 21 этаж, нижние этажи в алюминиевой сетке
+    this.building(xa, za, 26, 18, 21, M.glass, 0, M.roofDark, 3.8);
+    this.box(M.mesh, xa, 0, za, 27, 12, 19, 0, false);
+    this.sign(xa, 21 * 3.8 - 4, za + 9.2, 'HILTON', '#1b2a44', 11);
+    // JW Marriott
+    this.building(xb, za + 4, 22, 22, 33, M.modernB, 0, M.roofDark, 3.6);
+    this.sign(xb, 33 * 3.6 - 5, za + 15.2, 'JW MARRIOTT', '#3a2a1e', 13);
+    // Ritz-Carlton: стальной решётчатый экзоскелет поверх стекла
+    const rx = xb, rz = zb, H = 136;
+    this.geo(M.glass, new THREE.BoxGeometry(20, H, 20), rx, H / 2, rz);
+    for (let y = 0; y < H; y += 8) for (const [ox, oz, sx, sz] of [[0, 10.3, 20.8, 0.5], [0, -10.3, 20.8, 0.5], [10.3, 0, 0.5, 20.8], [-10.3, 0, 0.5, 20.8]]) this.box(M.darkSteel, rx + ox, y, rz + oz, sx, 0.6, sz);
+    for (const k of [-10.3, -3.4, 3.4, 10.3]) for (const sd of [-10.3, 10.3]) { this.box(M.darkSteel, rx + k, 0, rz + sd, 0.6, H, 0.6); this.box(M.darkSteel, rx + sd, 0, rz + k, 0.6, H, 0.6); }
+    this.collide(rx, rz, 21, 21);
+    this.sign(rx, H - 8, rz + 10.9, 'RITZ-CARLTON', '#1a1a1a', 13);
     this.labels.push({ x: r.cx, z: r.cz, text: 'Tashkent City' });
   }
 
-  cityPark(r) {
+  tcCongress(r) {    // Конгресс-холл в сетке, крытый мост через улицу к Hilton
+    const x = r.x0 + 18, z = r.z1 - 26;
+    this.box(M.mesh, x, 0, z, 30, 18, 40, 0, true);
+    this.box(M.shopGlass, x + 15.05, 0.5, z, 0.1, 10, 30);
+    this.sign(x + 15.2, 15, z, 'CONGRESS HALL', '#1b2a44', 14, Math.PI / 2);
+    // мост на уровне 3 этажа через улицу z = -290 до Hilton
+    const zh = HLINES.find(h => h.z === -290).z, z1 = z + 20, z2 = zh + W.st / 2 + SW + 26 - 9;   // до северного фасада Hilton
+    this.box(M.shopGlass, x, 9, (z1 + z2) / 2, 5, 4, z2 - z1);
+    this.box(M.mesh, x, 13, (z1 + z2) / 2, 5.4, 0.5, z2 - z1 + 0.4);
+    this.yardTrees(r, 10);
+    this.fountain(r.x1 - 18, r.cz, 4);
+  }
+
+  tcBoulevard(r) {   // бульвар: девять семиэтажных домов, между ними пешеходный променад с фонтанами
+    const cz = r.cz, n = 5, step = (r.w - 10) / n;
+    for (let k = 0; k < n; k++) {
+      const x = r.x0 + 5 + step * (k + 0.5);
+      this.building(x, cz - 24, step - 4, 16, 7, pick([M.modernA, M.modernC]), 0, M.roofDark, 3.4, { shops: true });
+      if (k < 4) this.building(x + step / 2, cz + 24, step - 4, 16, 7, pick([M.modernA, M.modernC]), 0, M.roofDark, 3.4, { shops: true });
+    }
+    this.quad(M.plaza, r.cx, 0.11, cz, r.w - 6, 30, 0, 10, 3);
+    for (let k = 0; k < 4; k++) this.fountain(r.x0 + 18 + k * ((r.w - 36) / 3), cz, 2.6);
+    for (let k = 0; k < 10; k++) { this.trees.push({ x: r.x0 + 10 + k * (r.w - 20) / 9, z: cz - 11, s: 0.9, kind: 'chinar' }); this.trees.push({ x: r.x0 + 10 + k * (r.w - 20) / 9, z: cz + 11, s: 0.9, kind: 'chinar' }); }
+    this.sign(r.x0 + 4, 5, cz, 'BOULEVARD', '#2a2a2a', 10, -Math.PI / 2);
+    this.labels.push({ x: r.cx, z: cz, text: 'Boulevard' });
+  }
+
+  mall(r, name, color, x = r.cx, z = r.cz - 10, w = 90, d = 56) {   // торговый центр: стеклянный атриум, вывеска, парковка
+    this.box(M.white, x, 0, z, w, 16, d, 0, true);
+    this.box(M.shopGlass, x, 0.3, z + d / 2 + 0.05, w * 0.6, 12, 0.12);
+    this.geo(M.shopGlass, new THREE.CylinderGeometry(10, 12, 6, 24), x, 19, z);
+    this.box(M.steel, x, 16, z, w + 1, 0.8, d + 1);
+    this.sign(x, 13.5, z + d / 2 + 0.3, name, color, Math.min(30, w * 0.4));
+    for (let k = 0; k < 16; k++) { const px = r.x0 + 10 + k * ((r.w - 20) / 15); if (rnd() < 0.6) this.parkedCar(px, r.z1 - 8, Math.PI / 2); }
+    this.labels.push({ x, z, text: name });
+  }
+  tcMall(r) { this.mall(r, 'TASHKENT CITY MALL', '#7a1f2b', r.cx, r.cz, 96, 64); }
+  megaPlanet(r) { this.mall(r, 'MEGA PLANET', '#e2382b'); this.yardTrees(r, 10); }
+  samarqandDarvoza(r) { this.mall(r, 'SAMARQAND DARVOZA', '#1f56a8', r.cx, r.cz - 8, 84, 50); this.yardTrees(r, 10); }
+
+  cityPark(r) {      // Tashkent City Park: входная арка, озеро с поющими фонтанами, мостики, амфитеатр
     const lx = r.cx, lz = r.cz;
-    this.geo(M.water, new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2), lx, 0.12, lz, 0, r.w * 0.33, 1, r.d * 0.3);
+    this.geo(M.water, new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2), lx, 0.12, lz, 0, r.w * 0.34, 1, r.d * 0.3);
     this.obstacles.add({ x: lx, z: lz, h: 0, hl: r.w * 0.3, hw: r.d * 0.27 });
-    for (let k = 0; k < 40; k++) { const a = rnd() * 7, x = lx + Math.cos(a) * r.w * rr(0.38, 0.46), z = lz + Math.sin(a) * r.d * rr(0.35, 0.45); this.trees.push({ x, z, s: rr(0.8, 1.2), kind: rnd() < 0.4 ? 'willow' : 'chinar' }); }
+    for (let k = 0; k < 9; k++) this.geo(M.white, new THREE.CylinderGeometry(0.15, 0.4, rr(3, 9), 8), lx - 14 + k * 3.5, 1.5, lz);   // струи фонтана
+    // входная арка с юга
+    const gx = r.cx, gz = r.z1 - 2;
+    for (const sd of [-1, 1]) this.box(M.steel, gx + sd * 11, 0, gz, 2.2, 12, 2.2, 0, true);
+    this.box(M.steel, gx, 12, gz, 25, 2.4, 2.4);
+    this.sign(gx, 13.2, gz + 1.3, 'TASHKENT CITY PARK', '#13202c', 22);
+    // амфитеатр
+    for (let k = 0; k < 5; k++) this.box(M.concrete, r.x0 + 14, k * 0.45, r.z0 + 12 + k * 1.6, 18, 0.45, 1.6);
+    for (let k = 0; k < 44; k++) { const a = rnd() * 7, x = lx + Math.cos(a) * r.w * rr(0.4, 0.47), z = lz + Math.sin(a) * r.d * rr(0.36, 0.45); this.trees.push({ x, z, s: rr(0.8, 1.2), kind: pick(['willow', 'chinar', 'sakura']) }); }
+    this.labels.push({ x: lx, z: lz, text: 'Tashkent City Park' });
+  }
+
+  // ---------- парки ----------
+  ferris(wx, wz, R) {
+    const cy = R + 3;
+    this.geo(M.white, new THREE.TorusGeometry(R, 0.35, 8, 48), wx, cy, wz, Math.PI / 2);
+    for (let k = 0; k < 16; k++) {
+      const a = k / 16 * Math.PI * 2;
+      const sp = new THREE.CylinderGeometry(0.12, 0.12, R, 4); sp.translate(0, R / 2, 0); sp.rotateX(a); sp.translate(wx, cy, wz); this.push(M.white, sp);
+      this.box(pick([M.red, M.gateBlue, M.green, M.crane]), wx, cy + Math.cos(a) * R - 1.6, wz + Math.sin(a) * R, 1.6, 1.6, 1.8);
+    }
+    for (const sd of [-1, 1]) { const leg = new THREE.CylinderGeometry(0.4, 0.6, cy + 1, 8); leg.translate(0, (cy + 1) / 2, 0); leg.rotateX(sd * 0.25); leg.translate(wx + 1.2, -0.5, wz); this.push(M.white, leg); }
+    this.collide(wx, wz, 4, R * 0.6);
+  }
+
+  lake(x, z, rx, rz) {
+    this.geo(M.water, new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2), x, 0.12, z, 0, rx, 1, rz);
+    this.geo(M.concrete, new THREE.RingGeometry(1, 1.04, 48).rotateX(-Math.PI / 2), x, 0.13, z, 0, rx, 1, rz);
+    this.obstacles.add({ x, z, h: 0, hl: rx * 0.85, hw: rz * 0.85 });
+  }
+
+  parkTrees(r, n, kinds, avoid = () => false) {
+    for (let k = 0; k < n; k++) { const x = rr(r.x0 + 4, r.x1 - 4), z = rr(r.z0 + 4, r.z1 - 4); if (!avoid(x, z)) this.trees.push({ x, z, s: rr(0.8, 1.35), kind: pick(kinds) }); }
+  }
+
+  navoiPark(r) {     // Национальный парк им. Навои: большое озеро, ротонда с памятником поэту, клумбы тюльпанов
+    const lx = r.cx, lz = r.cz + 18;
+    this.lake(lx, lz, r.w * 0.36, r.d * 0.26);
+    const mx = r.cx, mz = r.z0 + 22;
+    this.geo(M.white, new THREE.CylinderGeometry(9, 9.5, 1.2, 32), mx, 0.6, mz);
+    for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4; this.geo(M.white, new THREE.CylinderGeometry(0.4, 0.45, 9, 12), mx + Math.cos(a) * 6.5, 5.7, mz + Math.sin(a) * 6.5); }
+    this.geo(M.tiles, uvs(new THREE.SphereGeometry(7, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), 6, 2), mx, 10.2, mz);
+    this.geo(M.bronze, new THREE.CapsuleGeometry(0.6, 1.6, 4, 10), mx, 3.2, mz);
+    this.geo(M.bronze, new THREE.SphereGeometry(0.4, 12, 10), mx, 4.6, mz);
+    this.collide(mx, mz, 14, 14);
+    for (let k = 0; k < 6; k++) this.quad(M.rug, r.x0 + 10, 0.12, r.z0 + 40 + k * 6, 10, 2.4, 0, 1, 1);     // тюльпаны
+    this.parkTrees(r, 50, ['chinar', 'willow', 'poplar'], (x, z) => Math.hypot((x - lx) / (r.w * 0.4), (z - lz) / (r.d * 0.3)) < 1 || Math.hypot(x - mx, z - mz) < 12);
+    this.labels.push({ x: r.cx, z: r.cz, text: 'Парк Навои' });
+  }
+
+  japaneseGarden(r) { // Японский сад: пруды с островами, красные мостики, пагода, каменные фонари, сакура
+    const lx = r.cx - 8, lz = r.cz;
+    this.lake(lx, lz, r.w * 0.3, r.d * 0.22);
+    this.geo(M.grass, new THREE.CircleGeometry(6, 24).rotateX(-Math.PI / 2), lx + 6, 0.16, lz - 3);
+    const red = this.redLacquer || (this.redLacquer = new THREE.MeshStandardMaterial({ color: 0xb8262a, roughness: 0.5 }));
+    for (const [bx, bz] of [[lx - r.w * 0.22, lz], [lx + r.w * 0.24, lz + 4]]) {
+      const arc = new THREE.TorusGeometry(4, 0.35, 8, 24, Math.PI); this.geo(red, arc, bx, -1.2, bz, Math.PI / 2);
+      this.box(M.wood, bx, 1.6, bz, 2.4, 0.2, 7);
+    }
+    const px = r.x1 - 18, pz = r.z0 + 20;       // пагода в три яруса с загнутыми крышами
+    for (let k = 0; k < 3; k++) {
+      const s = 1 - k * 0.22, y = k * 4.2;
+      this.box(M.white, px, y, pz, 7 * s, 3.4, 7 * s);
+      this.geo(M.darkSteel, new THREE.ConeGeometry(6.6 * s, 1.6, 4, 1, true).rotateY(Math.PI / 4), px, y + 4, pz);
+    }
+    this.geo(M.gold, new THREE.CylinderGeometry(0.1, 0.25, 3, 8), px, 14.6, pz);
+    this.collide(px, pz, 8, 8);
+    for (let k = 0; k < 6; k++) { const x = lx - 12 + k * 6, z = lz + r.d * 0.27; this.box(M.concrete, x, 0, z, 0.6, 0.8, 0.6); this.box(M.concrete, x, 0.8, z, 1, 0.5, 1); this.box(M.concrete, x, 1.3, z, 1.2, 0.2, 1.2); }
+    this.parkTrees(r, 46, ['sakura', 'sakura', 'willow', 'chinar'], (x, z) => Math.hypot((x - lx) / (r.w * 0.34), (z - lz) / (r.d * 0.26)) < 1 || Math.hypot(x - px, z - pz) < 7);
+    this.labels.push({ x: r.cx, z: r.cz, text: 'Японский сад' });
+  }
+
+  gafurGulom(r) {    // парк Гафура Гуляма: колесо обозрения, карусель, американские горки, озеро
+    this.lake(r.cx - r.w * 0.2, r.cz + r.d * 0.18, r.w * 0.22, r.d * 0.16);
+    this.ferris(r.x1 - 14, r.z0 + 26, 16);
+    const cx = r.cx - 8, cz = r.z0 + 22;          // карусель
+    this.geo(M.white, new THREE.CylinderGeometry(6, 6, 0.6, 24), cx, 0.3, cz);
+    this.geo(M.red, new THREE.ConeGeometry(7, 3, 24), cx, 6, cz);
+    this.geo(M.gold, new THREE.CylinderGeometry(0.4, 0.4, 5, 8), cx, 2.8, cz);
+    for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4; this.box(pick([M.gateBlue, M.crane, M.green]), cx + Math.cos(a) * 4.5, 1, cz + Math.sin(a) * 4.5, 1, 1.2, 0.6, -a); }
+    this.collide(cx, cz, 12, 12);
+    const tx = r.cx + 6, tz = r.z1 - 26;          // горки: петляющий трек на опорах
+    const pts = []; for (let k = 0; k <= 40; k++) { const t = k / 40 * Math.PI * 2; pts.push(new THREE.Vector3(tx + Math.cos(t) * 18, 6 + Math.sin(t * 3) * 4 + 3, tz + Math.sin(t) * 9)); }
+    this.push(M.crane, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 120, 0.4, 6, true));
+    for (let k = 0; k < 40; k += 3) this.box(M.white, pts[k].x, 0, pts[k].z, 0.3, pts[k].y, 0.3, 0, true);
+    this.parkTrees(r, 34, ['chinar', 'poplar'], (x, z) => Math.hypot(x - (r.x1 - 14), z - (r.z0 + 26)) < 12 || Math.hypot(x - cx, z - cz) < 10 || Math.abs(z - tz) < 12);
+    this.labels.push({ x: r.cx, z: r.cz, text: 'Парк Гафура Гуляма' });
+  }
+
+  ankhorPark(r) {    // Анхор-Локомотив: детская железная дорога по кругу, паровозик, озеро
+    this.lake(r.cx, r.cz, r.w * 0.2, r.d * 0.14);
+    const rx = r.w * 0.38, rz = r.d * 0.38;
+    for (const d of [-0.7, 0.7]) this.geo(M.rail, new THREE.TorusGeometry(1, 0.012, 4, 96).rotateX(Math.PI / 2), r.cx, 0.15, r.cz, 0, rx + d, 1, rz + d);
+    const ang = 0.7, x = r.cx + Math.cos(ang) * rx, z = r.cz + Math.sin(ang) * rz, rot = -ang - Math.PI / 2;
+    this.box(M.green, x, 0.3, z, 4, 2.2, 1.6, rot, true); this.geo(M.red, new THREE.CylinderGeometry(0.4, 0.4, 1, 8), x, 2.8, z);
+    for (let k = 1; k <= 3; k++) { const a2 = ang - k * 0.14; this.box(pick([M.crane, M.gateBlue, M.red]), r.cx + Math.cos(a2) * rx, 0.3, r.cz + Math.sin(a2) * rz, 3.4, 1.6, 1.5, -a2 - Math.PI / 2, true); }
+    this.parkTrees(r, 40, ['willow', 'chinar', 'poplar'], (x2, z2) => Math.abs(Math.hypot((x2 - r.cx) / rx, (z2 - r.cz) / rz) - 1) < 0.08 || Math.hypot((x2 - r.cx) / (r.w * 0.24), (z2 - r.cz) / (r.d * 0.18)) < 1);
+    this.labels.push({ x: r.cx, z: r.cz, text: 'Анхор-Локомотив' });
+  }
+
+  botanical(r) {     // Ботанический сад: оранжереи-купола, аллеи, разные деревья
+    for (const [ox, oz, s] of [[-0.22, -0.2, 1], [0.2, -0.22, 0.75], [0, 0.24, 0.85]]) {
+      const x = r.cx + r.w * ox, z = r.cz + r.d * oz;
+      this.geo(M.stopGlass, new THREE.SphereGeometry(12 * s, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), x, 0, z);
+      for (let k = 0; k < 8; k++) { const g = new THREE.TorusGeometry(12 * s, 0.12, 4, 24, Math.PI); g.rotateY(k * Math.PI / 8); g.translate(x, 0, z); this.push(M.white, g); }
+      this.collide(x, z, 22 * s, 22 * s);
+    }
+    this.parkTrees(r, 70, ['chinar', 'poplar', 'willow', 'sakura', 'fruit']);
+    this.labels.push({ x: r.cx, z: r.cz, text: 'Ботанический сад' });
+  }
+
+  ecopark(r) {       // Экопарк: беговая дорожка, велодорожки, пруды, площадки
+    this.geo(M.track, new THREE.RingGeometry(1, 1.06, 64).rotateX(-Math.PI / 2), r.cx, 0.11, r.cz, 0, r.w * 0.42, 1, r.d * 0.42);
+    this.lake(r.cx + r.w * 0.15, r.cz - r.d * 0.12, r.w * 0.14, r.d * 0.1);
+    this.quad(M.court, r.cx - r.w * 0.18, 0.11, r.cz + r.d * 0.15, 18, 28, 0, 1, 2);
+    this.playground(r.cx - r.w * 0.2, r.cz - r.d * 0.2);
+    this.parkTrees(r, 80, ['chinar', 'poplar', 'willow'], (x, z) => Math.abs(Math.hypot((x - r.cx) / (r.w * 0.42), (z - r.cz) / (r.d * 0.42)) - 1) < 0.06);
+    this.labels.push({ x: r.cx, z: r.cz, text: 'Экопарк' });
+  }
+
+  boburPark(r) {     // парк Бобура: озеро, холм, ротонда
+    this.lake(r.cx - r.w * 0.1, r.cz, r.w * 0.24, r.d * 0.2);
+    const x = r.x1 - 20, z = r.z0 + 20;
+    for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; this.geo(M.white, new THREE.CylinderGeometry(0.3, 0.35, 5, 10), x + Math.cos(a) * 4, 2.5, z + Math.sin(a) * 4); }
+    this.geo(M.white, new THREE.SphereGeometry(4.6, 20, 8, 0, Math.PI * 2, 0, Math.PI / 2), x, 5, z, 0, 1, 0.5, 1);
+    this.collide(x, z, 9, 9);
+    this.parkTrees(r, 60, ['chinar', 'willow', 'poplar'], (x2, z2) => Math.hypot((x2 - r.cx + r.w * 0.1) / (r.w * 0.28), (z2 - r.cz) / (r.d * 0.24)) < 1);
+    this.fountain(r.x0 + 16, r.z1 - 16, 3);
+    this.labels.push({ x: r.cx, z: r.cz, text: 'Парк Бобура' });
   }
 
   minor(r) {        // мечеть Минор
@@ -1417,15 +1605,7 @@ export class World {
       this.geo(M.gateBlue, new THREE.ConeGeometry(3.6, 7, 20), x + ox, h + 3.5, z + oz);
       this.collide(x + ox, z + oz, 6, 6);
     }
-    const wx = r.x1 - 16, wz = r.cz, R = 18, cy = R + 3;
-    this.geo(M.white, new THREE.TorusGeometry(R, 0.35, 8, 48), wx, cy, wz, Math.PI / 2);
-    for (let k = 0; k < 16; k++) {
-      const a = k / 16 * Math.PI * 2;
-      const sp = new THREE.CylinderGeometry(0.12, 0.12, R, 4); sp.translate(0, R / 2, 0); sp.rotateX(a); sp.translate(wx, cy, wz); this.push(M.white, sp);
-      this.box(pick([M.red, M.gateBlue, M.green, M.crane]), wx, cy + Math.cos(a) * R - 1.6, wz + Math.sin(a) * R, 1.6, 1.6, 1.8);
-    }
-    for (const sd of [-1, 1]) { const leg = new THREE.CylinderGeometry(0.4, 0.6, cy + 1, 8); leg.translate(0, (cy + 1) / 2, 0); leg.rotateX(sd * 0.25); leg.translate(wx + 1.2, -0.5, wz); this.push(M.white, leg); }
-    this.collide(wx, wz, 4, 10);
+    this.ferris(r.x1 - 16, r.cz, 18);
     this.labels.push({ x, z, text: 'Magic City' });
     this.yardTrees(r, 16);
   }
@@ -1559,7 +1739,8 @@ export class World {
       }
       d.position.y = cy; d.scale.set(sx, sy, sx); d.updateMatrix(); crowns.setMatrixAt(i, d.matrix);
       const hue = t.kind === 'willow' ? 0.2 : t.kind === 'poplar' || t.kind === 'shrub' ? 0.28 : 0.23;
-      crowns.setColorAt(i, col.setHSL(hue + Math.random() * 0.04, 0.45, 0.22 + Math.random() * 0.08));
+      if (t.kind === 'sakura') crowns.setColorAt(i, col.setHSL(0.93 + Math.random() * 0.03, 0.55, 0.78 + Math.random() * 0.06));
+      else crowns.setColorAt(i, col.setHSL(hue + Math.random() * 0.04, 0.45, 0.22 + Math.random() * 0.08));
       if (!t.noCollide) this.obstacles.add({ x: t.x, z: t.z, h: 0, hl: 0.35, hw: 0.35 });
     });
     trunks.castShadow = crowns.castShadow = true; crowns.receiveShadow = true;

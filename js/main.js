@@ -4,6 +4,7 @@ import { Vehicle } from './physics.js';
 import { World, HALF, VLINES, HLINES, W, SW, RING_IN, RING_OUT, CANAL_X, CANAL_W, SPAWN, LEVEL_CENTER } from './world.js';
 import { LEVELS, LevelRunner } from './levels.js';
 import { Terrain } from './terrain.js';
+import { Hangar, HANGAR } from './garage.js';
 
 const $ = id => document.getElementById(id);
 const fmt = n => n.toLocaleString('ru-RU');
@@ -50,7 +51,14 @@ const SUN_OFF = new THREE.Vector3(90, 160, 60);
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
-let world, levels, player, playerMesh, terrain;
+let world, levels, player, playerMesh, terrain, hangar;
+let inHangar = false;
+// ангар (меню и гараж) или город (езда): показываем только одно, второе не рисуем
+function setScene(h) {
+  inHangar = h;
+  hangar.show(h); world.root.visible = !h; terrain.root.visible = !h; if (levels.group) levels.group.visible = !h; if (playerMesh) playerMesh.visible = !h;
+  if (h) hangar.setCar(buildCarMesh(carById(garageSel || save.car), garageColor || colorOf(garageSel || save.car), save.plate));
+}
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
 
 // ---------- Ввод ----------
@@ -193,7 +201,7 @@ function drawMapBase() {
     g.save(); g.translate(PX(L.lake.x), PZ(L.lake.z)); g.rotate(-L.lake.rot); g.fillStyle = '#1f6672'; g.beginPath(); g.ellipse(0, 0, L.lake.rx * MS, L.lake.rz * MS, 0, 0, 7); g.fill(); g.restore();
     g.strokeStyle = '#5a5c62'; g.lineWidth = 18 * MS + 1; g.lineCap = 'round'; g.beginPath();
     L.path.forEach((p, i) => (i ? g.lineTo(PX(p.x), PZ(p.z)) : g.moveTo(PX(p.x), PZ(p.z)))); g.stroke();
-    g.fillStyle = '#f2f0ea'; g.beginPath(); g.arc(PX(L.end.x), PZ(L.end.z), 6, 0, 7); g.fill();
+    g.fillStyle = '#f2f0ea'; for (const q of [L.amir, L.end]) { g.beginPath(); g.arc(PX(q.x), PZ(q.z), 6, 0, 7); g.fill(); }
   }
   g.fillStyle = '#6f6a5c';
   for (const l of world.labels) { g.beginPath(); g.arc(PX(l.x), PZ(l.z), 3, 0, 7); g.fill(); }
@@ -236,13 +244,15 @@ function updateMoney() {
 
 function enterPlay(m) {
   mode = m; paused = false; inRun = true;
+  setScene(false);
   show(null); $('hud').hidden = false; $('touch').hidden = !isTouch;
   $('level-panel').hidden = m !== 'level';
   $('btn-play').querySelector('span').textContent = 'Дальше';
   updateMoney();
 }
 function openMenu() {
-  paused = true;
+  paused = true; garageSel = null; garageColor = null;
+  setScene(true);
   $('hud').hidden = true; $('touch').hidden = true;
   show('menu'); updateMoney();
 }
@@ -327,15 +337,13 @@ function openGarage() {
   show('garage'); previewGarage(); renderGarage();
 }
 function leaveGarage() {
-  if (garageMesh) { scene.remove(garageMesh); garageMesh = null; }
-  playerMesh.visible = true;
   mode = prevMode === 'garage' ? 'menu' : prevMode;
+  garageSel = null; garageColor = null;
+  hangar.setCar(buildCarMesh(carById(save.car), colorOf(save.car), save.plate));
 }
-function previewGarage() {
-  if (garageMesh) scene.remove(garageMesh);
-  garageMesh = buildCarMesh(carById(garageSel), garageColor || colorOf(garageSel), save.plate);
-  garageMesh.position.set(player.x, 0, player.z); garageMesh.rotation.y = player.h;
-  scene.add(garageMesh); playerMesh.visible = false;
+function previewGarage() {        // машина на поворотном подиуме в ангаре
+  if (!inHangar) setScene(true);
+  hangar.setCar(buildCarMesh(carById(garageSel), garageColor || colorOf(garageSel), save.plate));
 }
 function renderGarage() {
   const tabs = $('car-tabs'); tabs.innerHTML = '';
@@ -429,27 +437,19 @@ function frame() {
     syncMesh(playerMesh, player);
     updateCamera(dt);
     $('speed').textContent = Math.round(Math.abs(player.speed) * 3.6);
+    $('speed-bar').style.width = Math.min(100, Math.abs(player.speed) / player.spec.maxSpeed * 100) + '%';
     $('gear').textContent = player.speed < -0.2 ? 'R' : Math.abs(player.speed) < 0.2 ? 'N' : 'D';
     drawMinimap();
     trafficCheck(dt);
-  } else if (mode === 'garage') {
-    orbit += dt * 0.3;
-    camera.up.set(0, 1, 0);
-    const wide = innerWidth > 720, R = wide ? 7.5 : 9;
-    camera.position.set(player.x + Math.cos(orbit) * R, 2.4, player.z + Math.sin(orbit) * R);
-    // машина левее центра на широком экране (справа панель) и выше на телефоне (снизу панель)
-    const rx = -Math.sin(orbit), rz = Math.cos(orbit), side = wide ? -2.2 : 0;
-    camera.lookAt(player.x + rx * side, wide ? 0.8 : -0.6, player.z + rz * side);
-  } else if (world) {
-    orbit += dt * 0.05;     // в меню камера медленно облетает машину на фоне сквера
-    camera.up.set(0, 1, 0);
-    camera.position.set(player.x + Math.cos(orbit) * 13, 3.2, player.z + Math.sin(orbit) * 13);
-    const shift = innerWidth > 720 ? 4.2 : 0;            // машина правее центра: слева меню
-    camera.lookAt(player.x - Math.sin(orbit) * shift, innerWidth > 720 ? 1.4 : 0.2, player.z + Math.cos(orbit) * shift);
+  } else if (hangar && inHangar) {
+    orbit += dt;
+    hangar.update(dt);
+    hangar.camera(camera, mode === 'garage' ? 'garage' : 'menu', orbit, innerWidth > 720);
   }
   if (world) world.updateSignals(t);
   audio.update(player ? player.speed : 0, input.up || input.down, input.horn, playing());
-  if (player) { const py = player.y || 0; sun.position.set(player.x + SUN_OFF.x, SUN_OFF.y + py, player.z + SUN_OFF.z); sun.target.position.set(player.x, py, player.z); }
+  if (inHangar) { sun.position.set(HANGAR.x + SUN_OFF.x, SUN_OFF.y, HANGAR.z + SUN_OFF.z); sun.target.position.set(HANGAR.x, 0, HANGAR.z); }
+  else if (player) { const py = player.y || 0; sun.position.set(player.x + SUN_OFF.x, SUN_OFF.y + py, player.z + SUN_OFF.z); sun.target.position.set(player.x, py, player.z); }
   scene.userData.sky.position.copy(camera.position);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -467,6 +467,9 @@ function frame() {
   await nextFrame();
   terrain = new Terrain(scene, world.obstacles);
   levels = new LevelRunner(scene, world.obstacles);
+  $('load-bar').style.width = '90%'; $('load-text').textContent = 'Открываем ангар…';
+  await nextFrame();
+  hangar = new Hangar(scene);
   player = new Vehicle(carById(save.car));
   player.reset(SPAWN.x, SPAWN.z, SPAWN.h); camHeading = player.h;
   rebuildPlayer();
@@ -478,6 +481,7 @@ function frame() {
   $('btn-play').classList.add('first');
   document.querySelectorAll('.nav-item').forEach(b => b.addEventListener('mouseenter', () => $('btn-play').classList.toggle('first', b.id === 'btn-play')));
   show('menu');
+  setScene(true);
   requestAnimationFrame(frame);
-  window.__game = { player, world, levels, save, startLevel, startFree, input, camera, terrain };
+  window.__game = { player, world, levels, save, startLevel, startFree, input, camera, terrain, hangar };
 })();
