@@ -4,13 +4,13 @@ import * as THREE from 'three';
 // model: сжатая glb-модель; paint: имя материала краски; rotY: поворот, чтобы перёд смотрел по +X.
 export const CARS = [
   { id: 'matiz', name: 'Matiz', type: 'hatch', len: 3.50, wid: 1.50, hgt: 1.50, price: 0,    maxSpeed: 36, accel: 7.5,
-    model: 'models/matiz.glb', paint: 'material_1', rotY: Math.PI / 2, desc: 'Маленький и юркий', parked: 3 },
-  { id: 'damas', name: 'Damas', type: 'van',   len: 3.48, wid: 1.40, hgt: 1.90, price: 4000, maxSpeed: 30, accel: 6.0,
-    model: 'models/damas.glb', paint: 'material_3', rotY: Math.PI, desc: 'Легенда ташкентских маршруток', parked: 2 },
-  { id: 'nexia', name: 'Nexia', type: 'sedan', len: 4.48, wid: 1.66, hgt: 1.42, price: 12000, maxSpeed: 46, accel: 9.0,
-    model: 'models/nexia.glb', paint: 'paint', rotY: Math.PI / 2, desc: 'Народный седан', parked: 3 },
-  { id: 'malibu', name: 'Malibu', type: 'sedan', len: 4.92, wid: 1.85, hgt: 1.47, price: 55000, maxSpeed: 62, accel: 12.5,
-    model: 'models/malibu.glb', paint: 'int_mat', rotY: Math.PI / 2, desc: 'Бизнес-класс', parked: 1 },
+    model: 'models/matiz.glb', lod: 'models/matiz_lod.glb', paint: 'material_1', rotY: Math.PI / 2, desc: 'Маленький и юркий', parked: 3 },
+  { id: 'damas', name: 'Damas', type: 'van',   len: 3.48, wid: 1.40, hgt: 1.90, price: 0, maxSpeed: 30, accel: 6.0,
+    model: 'models/damas.glb', paint: 'material_3', rotY: Math.PI, desc: 'Легенда ташкентских маршруток', parked: 1 },
+  { id: 'nexia', name: 'Nexia', type: 'sedan', len: 4.48, wid: 1.66, hgt: 1.42, price: 0, maxSpeed: 46, accel: 9.0,
+    model: 'models/nexia.glb', lod: 'models/nexia_lod.glb', paint: 'paint', rotY: Math.PI / 2, desc: 'Народный седан', parked: 3 },
+  { id: 'malibu', name: 'Malibu', type: 'sedan', len: 4.92, wid: 1.85, hgt: 1.47, price: 0, maxSpeed: 62, accel: 12.5,
+    model: 'models/malibu.glb', lod: 'models/malibu_lod.glb', paint: 'int_mat', rotY: Math.PI / 2, desc: 'Бизнес-класс', parked: 1 },
 ];
 
 export const CREDITS = [
@@ -255,7 +255,7 @@ function buildProcCar(spec, colorHex, plate = randomPlate()) {
 }
 
 // ---------- Настоящие 3D-модели ----------
-const templates = new Map();
+const templates = new Map(), lodTemplates = new Map();
 
 export async function loadCarModels() {
   let GLTFLoader, MeshoptDecoder;
@@ -265,15 +265,17 @@ export async function loadCarModels() {
     await MeshoptDecoder.ready;
   } catch (e) { console.warn('glTF недоступен, используются простые модели', e); return; }
   const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
+  const load = async (id, url) => {
+    const b64 = window.__MODEL_DATA && window.__MODEL_DATA[id];
+    return b64 ? loader.parseAsync(Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer, '') : loader.loadAsync(url);
+  };
   await Promise.all(CARS.map(async spec => {
-    try {
-      // модели могут быть встроены в страницу (window.__MODEL_DATA: base64) или лежать рядом файлами
-      const b64 = window.__MODEL_DATA && window.__MODEL_DATA[spec.id];
-      const gltf = b64
-        ? await loader.parseAsync(Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer, '')
-        : await loader.loadAsync(spec.model);
-      templates.set(spec.id, prepareTemplate(spec, gltf.scene));
-    } catch (e) { console.warn('Не удалось загрузить', spec.model, e); }
+    try { templates.set(spec.id, prepareTemplate(spec, (await load(spec.id, spec.model)).scene)); }
+    catch (e) { console.warn('Не удалось загрузить', spec.model, e); }
+    if (spec.lod) {
+      try { const keepH = spec.hgt; lodTemplates.set(spec.id, prepareTemplate(spec, (await load(spec.id + '_lod', spec.lod)).scene)); spec.hgt = keepH; }
+      catch (e) { console.warn('Нет облегчённой модели', spec.lod); }
+    }
   }));
 }
 
@@ -340,8 +342,8 @@ function paintMaterial(base, hex) {
   return paintCache.get(key);
 }
 
-export function buildCarMesh(spec, colorHex, plate) {
-  const t = templates.get(spec.id);
+export function buildCarMesh(spec, colorHex, plate, lod = false) {
+  const t = (lod && lodTemplates.get(spec.id)) || templates.get(spec.id);
   if (!t) return buildProcCar(spec, colorHex, plate);
   const group = t.wrap.clone(true);
   const wheels = []; let body = null;
@@ -360,7 +362,7 @@ const shadowMat = new THREE.MeshBasicMaterial({ color: 0, transparent: true, opa
 // Добавляет геометрию машины в общие «вёдра» по материалам (для стоящих машин, чтобы рисовать их одним вызовом)
 const _m = new THREE.Matrix4();
 export function addCarToBuckets(spec, colorHex, x, z, h, buckets) {
-  const mesh = buildCarMesh(spec, colorHex);
+  const mesh = buildCarMesh(spec, colorHex, undefined, true);
   mesh.position.set(x, 0, z); mesh.rotation.y = h;
   mesh.updateMatrixWorld(true);
   mesh.traverse(o => {

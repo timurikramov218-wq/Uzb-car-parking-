@@ -74,7 +74,7 @@ export class Vehicle {
     this.x = x; this.z = z; this.h = h;
     this.vx = 0; this.vz = 0; this.r = 0;
     this.speed = 0; this.lat = 0; this.steer = 0; this.braking = false; this.wheelRot = 0;
-    this.roll = 0; this.pitch = 0; this.prevU = 0; this.skid = 0;
+    this.roll = 0; this.pitch = 0; this.prevU = 0; this.skid = 0; this.y = 0; this.tPitch = 0; this.tRoll = 0; this.grade = 0;
   }
 
   update(dt, inp, obstacles, bounds) {
@@ -110,8 +110,9 @@ export class Vehicle {
     if (inp.brake) { F -= Math.sign(u) * m * 3.5; this.braking = true; }
     F -= Math.sign(u) * m * (coasting ? 0.7 : 0.15);         // качение и торможение двигателем
     F -= 0.38 * u * Math.abs(u);                              // воздух
+    if (this.grade) F -= m * 9.81 * Math.max(-0.35, Math.min(0.35, this.grade));   // подъём и спуск
     let un = u + (F / m + w * this.r) * dt;
-    if ((coasting || this.braking) && u * un < 0) un = 0;     // не уезжать назад от торможения
+    if ((coasting || this.braking) && u * un < 0 && Math.abs(this.grade || 0) < 0.06) un = 0;     // не уезжать назад от торможения (на крутом склоне машина может скатиться)
 
     // боковая динамика
     const dyn = u > 0 ? smooth(3.5, 8, u) : 0;

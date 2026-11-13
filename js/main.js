@@ -3,6 +3,7 @@ import { CARS, COLORS, CREDITS, carById, buildCarMesh, randomPlate, loadCarModel
 import { Vehicle } from './physics.js';
 import { World, HALF, VLINES, HLINES, W, SW, RING_IN, RING_OUT, CANAL_X, CANAL_W, SPAWN, LEVEL_CENTER } from './world.js';
 import { LEVELS, LevelRunner } from './levels.js';
+import { Terrain } from './terrain.js';
 
 const $ = id => document.getElementById(id);
 const fmt = n => n.toLocaleString('ru-RU');
@@ -13,7 +14,7 @@ const SAVE_KEY = 'uzbcarparking-save-v2';
 const save = Object.assign({ money: 1500, owned: ['matiz'], car: 'matiz', colors: {}, stars: {}, plate: randomPlate() },
   (() => { try { return JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; } catch { return {}; } })());
 if (!CARS.some(c => c.id === save.car)) save.car = 'matiz';
-save.owned = save.owned.filter(id => CARS.some(c => c.id === id)); if (!save.owned.includes('matiz')) save.owned.unshift('matiz');
+save.owned = CARS.map(c => c.id);          // все машины бесплатные и сразу в гараже
 const persist = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch {} };
 const colorOf = id => save.colors[id] || WHITE;          // все машины по умолчанию белые
 
@@ -27,8 +28,8 @@ renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 4000);
-scene.fog = new THREE.Fog(0xdfe6ea, 250, 2200);
+const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 12000);
+scene.fog = new THREE.Fog(0xdfe6ea, 400, 7600);
 {
   const m = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
@@ -36,7 +37,7 @@ scene.fog = new THREE.Fog(0xdfe6ea, 250, 2200);
     vertexShader: 'varying vec3 p; void main(){ p = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
     fragmentShader: 'uniform vec3 top; uniform vec3 bottom; varying vec3 p; void main(){ float t = clamp(p.y*1.8,0.,1.); gl_FragColor = vec4(mix(bottom, top, pow(t,0.6)),1.); }',
   });
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(3000, 32, 16), m); sky.renderOrder = -1; scene.add(sky); scene.userData.sky = sky;
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(11000, 32, 16), m); sky.renderOrder = -1; scene.add(sky); scene.userData.sky = sky;
 }
 scene.add(new THREE.HemisphereLight(0xdfeeff, 0x9a8a6a, 1.0));
 const sun = new THREE.DirectionalLight(0xfff0d8, 2.5);
@@ -49,7 +50,7 @@ const SUN_OFF = new THREE.Vector3(90, 160, 60);
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
-let world, levels, player, playerMesh;
+let world, levels, player, playerMesh, terrain;
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
 
 // ---------- Ввод ----------
@@ -135,7 +136,7 @@ function rebuildPlayer() {
   scene.add(playerMesh); syncMesh(playerMesh, player);
 }
 function syncMesh(mesh, v) {
-  mesh.position.set(v.x, 0, v.z); mesh.rotation.y = v.h;
+  mesh.position.set(v.x, v.y || 0, v.z); mesh.rotation.order = 'YZX'; mesh.rotation.set(v.tRoll || 0, v.h, v.tPitch || 0);
   for (const w of mesh.userData.wheels) {
     if (w.single) w.pivot.rotation.set(0, w.front ? v.steer : 0, v.wheelRot);
     else { w.spin.rotation.z = v.wheelRot; if (w.front) w.pivot.rotation.y = v.steer; }
@@ -156,14 +157,15 @@ function updateCamera(dt, snap = false) {
   let dh = player.h - camHeading; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
   camHeading += dh * (snap ? 1 : 1 - Math.exp(-dt * 4));
   const fx = Math.cos(camHeading), fz = -Math.sin(camHeading);
-  const want = new THREE.Vector3(), look = new THREE.Vector3(player.x, 1, player.z);
+  const py = player.y || 0;
+  const want = new THREE.Vector3(), look = new THREE.Vector3(player.x, 1 + py, player.z);
   if (c.inside) {
     const s = player.spec, hx = Math.cos(player.h), hz = -Math.sin(player.h);
-    camPos.set(player.x - hx * s.len * 0.08 + hz * 0.32, s.hgt * 0.78, player.z - hz * s.len * 0.08 - hx * 0.32);
-    camLook.set(player.x + hx * 20, s.hgt * 0.7, player.z + hz * 20);
+    camPos.set(player.x - hx * s.len * 0.08 + hz * 0.32, s.hgt * 0.78 + py, player.z - hz * s.len * 0.08 - hx * 0.32);
+    camLook.set(player.x + hx * 20, s.hgt * 0.7 + py + Math.tan(player.tPitch || 0) * 20, player.z + hz * 20);
   } else {
-    if (c.top) want.set(player.x - fx * 0.01, 34, player.z - fz * 0.01);
-    else { want.set(player.x - fx * c.dist, c.h, player.z - fz * c.dist); look.y = 1; }
+    if (c.top) want.set(player.x - fx * 0.01, 34 + py, player.z - fz * 0.01);
+    else { const gy = terrain ? Math.max(terrain.heightAt(player.x - fx * c.dist, player.z - fz * c.dist) + 1.5, py + c.h) : c.h; want.set(player.x - fx * c.dist, gy, player.z - fz * c.dist); look.y = 1 + py; }
     const k = snap ? 1 : 1 - Math.exp(-dt * 5);
     camPos.lerp(want, k); camLook.lerp(look, k);
   }
@@ -174,26 +176,34 @@ function updateCamera(dt, snap = false) {
 
 // ---------- Мини-карта ----------
 const mm = $('minimap'), mctx = mm.getContext('2d');
-const MAP_PX = 1280, MS = MAP_PX / (HALF * 2);
+const MX0 = -720, MZ0 = -4400, MAP_SIZE = 5120, MAP_PX = 2048, MS = MAP_PX / MAP_SIZE;   // город + горы на северо-востоке
 const mapCanvas = document.createElement('canvas'); mapCanvas.width = mapCanvas.height = MAP_PX;
 function drawMapBase() {
-  const g = mapCanvas.getContext('2d'), P = v => (v + HALF) * MS;
+  const g = mapCanvas.getContext('2d'), PX = v => (v - MX0) * MS, PZ = v => (v - MZ0) * MS;
   g.fillStyle = '#1c1d20'; g.fillRect(0, 0, MAP_PX, MAP_PX);
-  g.fillStyle = '#26362a'; for (const r of [[0, 0, RING_IN]]) { g.beginPath(); g.arc(P(r[0]), P(r[1]), r[2] * MS, 0, 7); g.fill(); }
-  g.fillStyle = '#244b57'; g.fillRect(P(CANAL_X - CANAL_W / 2), 0, CANAL_W * MS, MAP_PX);
+  g.fillStyle = '#23261f'; g.fillRect(PX(450), PZ(-4350), 3900 * MS, 3900 * MS);
+  g.fillStyle = '#26362a'; g.beginPath(); g.arc(PX(0), PZ(0), RING_IN * MS, 0, 7); g.fill();
+  g.fillStyle = '#244b57'; g.fillRect(PX(CANAL_X - CANAL_W / 2), PZ(-640), CANAL_W * MS, 1280 * MS);
   g.fillStyle = '#4a4c52';
-  for (const v of VLINES) g.fillRect(P(v.x - W[v.t] / 2), P(-580 - 20), W[v.t] * MS, 1200 * MS);
-  for (const h of HLINES) g.fillRect(P(-580 - 20), P(h.z - W[h.t] / 2), 1200 * MS, W[h.t] * MS);
-  g.strokeStyle = '#4a4c52'; g.lineWidth = (RING_OUT - RING_IN) * MS; g.beginPath(); g.arc(P(0), P(0), ((RING_IN + RING_OUT) / 2) * MS, 0, 7); g.stroke();
+  for (const v of VLINES) g.fillRect(PX(v.x - W[v.t] / 2), PZ(-600), W[v.t] * MS, 1200 * MS);
+  for (const h of HLINES) g.fillRect(PX(-600), PZ(h.z - W[h.t] / 2), 1200 * MS, W[h.t] * MS);
+  g.strokeStyle = '#4a4c52'; g.lineWidth = (RING_OUT - RING_IN) * MS; g.beginPath(); g.arc(PX(0), PZ(0), ((RING_IN + RING_OUT) / 2) * MS, 0, 7); g.stroke();
+  if (terrain) {
+    const L = terrain.mapData();
+    g.save(); g.translate(PX(L.lake.x), PZ(L.lake.z)); g.rotate(-L.lake.rot); g.fillStyle = '#1f6672'; g.beginPath(); g.ellipse(0, 0, L.lake.rx * MS, L.lake.rz * MS, 0, 0, 7); g.fill(); g.restore();
+    g.strokeStyle = '#5a5c62'; g.lineWidth = 18 * MS + 1; g.lineCap = 'round'; g.beginPath();
+    L.path.forEach((p, i) => (i ? g.lineTo(PX(p.x), PZ(p.z)) : g.moveTo(PX(p.x), PZ(p.z)))); g.stroke();
+    g.fillStyle = '#f2f0ea'; g.beginPath(); g.arc(PX(L.end.x), PZ(L.end.z), 6, 0, 7); g.fill();
+  }
   g.fillStyle = '#6f6a5c';
-  for (const l of world.labels) { g.beginPath(); g.arc(P(l.x), P(l.z), 4, 0, 7); g.fill(); }
+  for (const l of world.labels) { g.beginPath(); g.arc(PX(l.x), PZ(l.z), 3, 0, 7); g.fill(); }
 }
 function drawMinimap() {
   const Wd = mm.width, s = 1.6;
   mctx.save();
   mctx.fillStyle = '#1c1d20'; mctx.fillRect(0, 0, Wd, Wd);
   mctx.translate(Wd / 2, Wd / 2); mctx.rotate(camHeading - Math.PI / 2); mctx.scale(s / MS, s / MS);
-  mctx.drawImage(mapCanvas, -(player.x + HALF) * MS, -(player.z + HALF) * MS);
+  mctx.drawImage(mapCanvas, -(player.x - MX0) * MS, -(player.z - MZ0) * MS);
   mctx.restore();
   const a = camHeading - Math.PI / 2;
   const dot = (x, z, col, r) => {
@@ -332,42 +342,30 @@ function renderGarage() {
   for (const c of CARS) {
     const b = document.createElement('button'); b.className = c.id === garageSel ? 'on' : '';
     const own = save.owned.includes(c.id);
-    b.innerHTML = `<span>${c.name}</span><small>${c.id === save.car ? 'за рулём' : own ? 'в гараже' : fmt(c.price) + ' сум'}</small>`;
+    b.innerHTML = `<span>${c.name}</span><small>${c.id === save.car ? 'за рулём' : 'бесплатно'}</small>`;
     b.onclick = () => { garageSel = c.id; garageColor = null; previewGarage(); renderGarage(); };
     tabs.append(b);
   }
   const c = carById(garageSel), owned = save.owned.includes(c.id);
   $('car-desc').textContent = c.desc;
-  $('car-specs').innerHTML = `<div><b>${Math.round(c.maxSpeed * 3.6)}</b><span>км/ч</span></div><div><b>${c.len.toFixed(1)}</b><span>длина, м</span></div><div><b>${owned ? '—' : fmt(c.price)}</b><span>${owned ? 'в гараже' : 'сум'}</span></div>`;
+  $('car-specs').innerHTML = `<div><b>${Math.round(c.maxSpeed * 3.6)}</b><span>км/ч</span></div><div><b>${c.len.toFixed(1)}</b><span>длина, м</span></div><div><b>${Math.round(c.accel * 10) / 10}</b><span>разгон, м/с²</span></div>`;
   const cl = $('color-list'); cl.innerHTML = '';
   const cur = garageColor || colorOf(garageSel);
   for (const col of COLORS) {
     const b = document.createElement('button'); b.style.background = col.hex; b.title = col.name; b.setAttribute('aria-label', col.name);
     if (col.hex === cur) b.className = 'on';
-    b.onclick = () => { garageColor = col.hex; previewGarage(); renderGarage(); };
+    b.onclick = () => { save.colors[garageSel] = col.hex; persist(); garageColor = null; if (garageSel === save.car) rebuildPlayer(); previewGarage(); renderGarage(); };
     cl.append(b);
   }
   const btn = $('btn-buy');
-  if (!owned) { btn.textContent = `Купить за ${fmt(c.price)} сум`; btn.disabled = save.money < c.price; }
-  else if (garageColor && garageColor !== colorOf(c.id)) { btn.textContent = 'Покрасить за 200 сум'; btn.disabled = save.money < 200; }
-  else { btn.textContent = c.id === save.car ? 'Поехали' : 'Выбрать'; btn.disabled = false; }
+  btn.textContent = c.id === save.car ? 'Поехали' : 'Выбрать'; btn.disabled = false;
   updateMoney();
 }
 $('btn-buy').onclick = () => {
-  const c = carById(garageSel), owned = save.owned.includes(c.id);
-  if (!owned) {
-    if (save.money < c.price) return;
-    save.money -= c.price; save.owned.push(c.id); if (garageColor) save.colors[c.id] = garageColor;
-    save.car = c.id; toast(`${c.name} теперь ваша`); audio.ding();
-  } else if (garageColor && garageColor !== colorOf(c.id)) {
-    if (save.money < 200) return;
-    save.money -= 200; save.colors[c.id] = garageColor; save.car = c.id; garageColor = null; toast('Покрашено');
-  } else {
-    save.car = c.id; persist(); rebuildPlayer(); leaveGarage();
-    if (inRun) enterPlay(mode === 'level' ? 'level' : 'free'); else startFree();
-    return;
-  }
-  persist(); rebuildPlayer(); previewGarage(); renderGarage();
+  const c = carById(garageSel);
+  if (c.id !== save.car) { save.car = c.id; persist(); rebuildPlayer(); previewGarage(); renderGarage(); toast(`${c.name} — за рулём`); return; }
+  leaveGarage();
+  if (inRun) enterPlay(mode === 'level' ? 'level' : 'free'); else startFree();
 };
 
 // ---------- Светофоры: подсказка и штраф за красный ----------
@@ -408,7 +406,16 @@ function frame() {
   if (window.__freeCam) {
     window.__freeCam(camera);
   } else if (playing()) {
-    const hit = player.update(dt, input, world.obstacles, HALF - 10);
+    // уклон дороги: разница высот под передом и задом машины
+    const hx = Math.cos(player.h), hz = -Math.sin(player.h), hl = player.spec.len / 2, hw = player.spec.wid / 2;
+    const yF = terrain.heightAt(player.x + hx * hl, player.z + hz * hl), yB = terrain.heightAt(player.x - hx * hl, player.z - hz * hl);
+    player.grade = (yF - yB) / player.spec.len;
+    const hit = player.update(dt, input, world.obstacles, 3600);
+    player.y = terrain.heightAt(player.x, player.z);
+    const yL = terrain.heightAt(player.x + hz * hw, player.z - hx * hw), yR = terrain.heightAt(player.x - hz * hw, player.z + hx * hw);
+    const k = 1 - Math.exp(-dt * 10);
+    player.tPitch = (player.tPitch || 0) + (Math.atan2(yF - yB, player.spec.len) - (player.tPitch || 0)) * k;
+    player.tRoll = (player.tRoll || 0) + (Math.atan2(yL - yR, player.spec.wid) - (player.tRoll || 0)) * k;
     if (hit > 1.2) audio.thump(hit);
     if (mode === 'level') {
       const r = levels.update(dt, player, hit, t);
@@ -442,7 +449,7 @@ function frame() {
   }
   if (world) world.updateSignals(t);
   audio.update(player ? player.speed : 0, input.up || input.down, input.horn, playing());
-  if (player) { sun.position.set(player.x + SUN_OFF.x, SUN_OFF.y, player.z + SUN_OFF.z); sun.target.position.set(player.x, 0, player.z); }
+  if (player) { const py = player.y || 0; sun.position.set(player.x + SUN_OFF.x, SUN_OFF.y + py, player.z + SUN_OFF.z); sun.target.position.set(player.x, py, player.z); }
   scene.userData.sky.position.copy(camera.position);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -456,6 +463,9 @@ function frame() {
   $('load-bar').style.width = '55%'; $('load-text').textContent = 'Строим Ташкент…';
   await nextFrame();
   world = new World(scene);
+  $('load-bar').style.width = '75%'; $('load-text').textContent = 'Дорога в горы…';
+  await nextFrame();
+  terrain = new Terrain(scene, world.obstacles);
   levels = new LevelRunner(scene, world.obstacles);
   player = new Vehicle(carById(save.car));
   player.reset(SPAWN.x, SPAWN.z, SPAWN.h); camHeading = player.h;
@@ -469,5 +479,5 @@ function frame() {
   document.querySelectorAll('.nav-item').forEach(b => b.addEventListener('mouseenter', () => $('btn-play').classList.toggle('first', b.id === 'btn-play')));
   show('menu');
   requestAnimationFrame(frame);
-  window.__game = { player, world, levels, save, startLevel, startFree, input, camera };
+  window.__game = { player, world, levels, save, startLevel, startFree, input, camera, terrain };
 })();
