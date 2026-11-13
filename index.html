@@ -2,111 +2,108 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<meta name="theme-color" content="#0b1a24">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#eef0f2">
 <title>UZB Car Parking</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600&family=Unbounded:wght@500;700&display=swap">
 <link rel="stylesheet" href="style.css">
-<script src="vendor/peerjs.min.js"></script>
-<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }</script>
 </head>
 <body>
 <canvas id="game"></canvas>
 
 <!-- HUD -->
-<div id="hud" class="hidden">
-  <div class="top-left">
-    <button class="icon-btn" id="btn-pause" title="Меню (Esc)">☰</button>
-    <div id="online-info" class="pill hidden"></div>
+<div id="hud" hidden>
+  <button class="glass round" id="btn-pause" aria-label="Пауза">
+    <svg viewBox="0 0 24 24" width="18" height="18"><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="5" width="4" height="14" rx="1.5"/></svg>
+  </button>
+  <div class="glass pill money" id="money">0 сум</div>
+  <div class="glass level" id="level-panel" hidden>
+    <div class="level-row"><b id="lvl-name"></b><span id="lvl-time">0:00</span><span id="lvl-hits">0</span></div>
+    <div id="lvl-hint" class="level-hint"></div>
   </div>
-  <div class="top-right"><div class="pill money">💰 <span id="money">0</span> сум</div></div>
-  <div id="level-panel" class="level-panel hidden">
-    <div id="lvl-name"></div>
-    <div class="lvl-stats"><span>⏱ <b id="lvl-time">0</b></span><span>💥 <b id="lvl-hits">0</b></span></div>
-    <div id="lvl-hint" class="lvl-hint"></div>
-  </div>
-  <canvas id="minimap" width="180" height="180"></canvas>
-  <div class="speedo"><b id="speed">0</b><small>км/ч</small><div id="gear">P</div></div>
+  <canvas id="minimap" width="264" height="264"></canvas>
+  <div class="glass speed"><b id="speed">0</b><span>км/ч</span><i id="gear">N</i></div>
   <div id="toast" class="toast"></div>
-  <div id="chat-log" class="chat-log hidden"></div>
-  <input id="chat-input" class="chat-input hidden" maxlength="120" placeholder="Сообщение… (Enter)">
-  <div class="keys-hint">W/S — газ/тормоз · A/D — руль · Пробел — ручник · C — камера · H — сигнал · R — сброс · T — чат</div>
 </div>
 
 <!-- Сенсорное управление -->
-<div id="touch" class="hidden">
-  <div class="tleft"><button data-k="left">◀</button><button data-k="right">▶</button></div>
-  <div class="tright">
-    <button data-k="brake" class="small">✋</button>
-    <button data-k="cam" class="small">🎥</button>
-    <button data-k="horn" class="small">📯</button>
-    <button data-k="down">⬇</button><button data-k="up" class="gas">⬆</button>
+<div id="touch" hidden>
+  <div class="t-left">
+    <button data-k="left" aria-label="Влево"><svg viewBox="0 0 24 24"><path d="M15 5 8 12l7 7"/></svg></button>
+    <button data-k="right" aria-label="Вправо"><svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></button>
+  </div>
+  <div class="t-right">
+    <div class="t-small">
+      <button data-k="cam" class="sm" aria-label="Камера"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M4 8h3l2-2h6l2 2h3v10H4z"/></svg></button>
+      <button data-k="brake" class="sm" aria-label="Ручник">P</button>
+    </div>
+    <button data-k="down" class="pedal" aria-label="Тормоз"></button>
+    <button data-k="up" class="pedal gas" aria-label="Газ"></button>
   </div>
 </div>
 
-<!-- Меню -->
-<div id="menu" class="screen">
-  <div class="menu-card">
-    <div class="logo">
-      <div class="flag"><i></i><i></i><i></i></div>
-      <h1>UZB <span>CAR</span> PARKING</h1>
-      <p>Открытый мир · Узбекские машины · Онлайн · Уровни</p>
+<!-- Главное меню -->
+<section id="menu" class="screen menu" hidden>
+  <div class="menu-card glass">
+    <div class="eyebrow">Toshkent</div>
+    <h1>Car Parking</h1>
+    <p class="lead">Открытый город и десять уровней парковки</p>
+    <div class="actions">
+      <button class="btn primary" id="btn-play">Поехать <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      <div class="row2">
+        <button class="btn" id="btn-levels">Парковка</button>
+        <button class="btn" id="btn-garage">Гараж</button>
+      </div>
     </div>
-    <div class="menu-buttons">
-      <button class="big" data-go="free">🚗 Свободная езда</button>
-      <button class="big" data-go="levels">🅿️ Уровни парковки</button>
-      <button class="big" data-go="online">🌐 Онлайн</button>
-      <button class="big" data-go="garage">🔧 Гараж</button>
-      <button class="big ghost hidden" id="btn-resume" data-go="resume">▶ Продолжить</button>
-    </div>
-    <div class="menu-foot">💰 <span id="menu-money">0</span> сум · <span id="menu-car"></span></div>
+    <div class="foot"><span id="menu-money"></span><button class="link" id="btn-credits">Авторы моделей</button></div>
+    <p class="credits" id="credits" hidden></p>
   </div>
-</div>
+</section>
 
-<div id="levels" class="screen hidden">
-  <div class="panel">
-    <div class="panel-head"><h2>Уровни парковки</h2><button class="icon-btn" data-go="menu">✕</button></div>
+<!-- Уровни -->
+<section id="levels" class="screen" hidden>
+  <div class="sheet glass">
+    <header><h2>Парковка</h2><button class="glass round close" data-close aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
     <div id="level-grid" class="level-grid"></div>
   </div>
-</div>
+</section>
 
-<div id="garage" class="screen hidden transparent">
-  <div class="garage-ui">
-    <div class="panel-head"><h2>Гараж</h2><button class="icon-btn" data-go="menu">✕</button></div>
-    <div class="garage-money">💰 <span id="garage-money">0</span> сум</div>
-    <div id="car-list" class="car-list"></div>
-    <h3>Цвет</h3>
-    <div id="color-list" class="color-list"></div>
-    <button id="btn-buy" class="big"></button>
+<!-- Гараж -->
+<section id="garage" class="screen side" hidden>
+  <div class="sheet glass garage">
+    <header><h2>Гараж</h2><button class="glass round close" data-close aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
+    <div class="seg" id="car-tabs"></div>
+    <p class="car-desc" id="car-desc"></p>
+    <div class="specs" id="car-specs"></div>
+    <div class="label">Цвет</div>
+    <div class="swatches" id="color-list"></div>
+    <button class="btn primary wide" id="btn-buy"></button>
+    <div class="garage-money" id="garage-money"></div>
   </div>
-</div>
+</section>
 
-<div id="online" class="screen hidden">
-  <div class="panel narrow">
-    <div class="panel-head"><h2>Онлайн</h2><button class="icon-btn" data-go="menu">✕</button></div>
-    <label>Твоё имя<input id="player-name" maxlength="16" placeholder="Например, Timur"></label>
-    <button class="big" id="btn-host">Создать комнату</button>
-    <div class="or">или</div>
-    <label>Код комнаты<input id="room-code" maxlength="4" placeholder="ABCD" style="text-transform:uppercase"></label>
-    <button class="big" id="btn-join">Подключиться</button>
-    <p id="online-status" class="status"></p>
-    <p class="note">Создай комнату и отправь код друзьям — вы окажетесь в одном городе.</p>
-  </div>
-</div>
-
-<div id="result" class="screen hidden">
-  <div class="panel narrow center">
+<!-- Итог уровня -->
+<section id="result" class="screen" hidden>
+  <div class="sheet glass small center">
     <h2 id="res-title"></h2>
     <div id="res-stars" class="stars"></div>
-    <p id="res-text"></p>
-    <div class="row">
-      <button class="big ghost" id="res-menu">Меню</button>
-      <button class="big ghost" id="res-retry">Заново</button>
-      <button class="big" id="res-next">Дальше ▶</button>
+    <p id="res-text" class="muted"></p>
+    <div class="row2">
+      <button class="btn" id="res-retry">Заново</button>
+      <button class="btn primary" id="res-next">Дальше</button>
     </div>
+    <button class="link" id="res-menu">В меню</button>
   </div>
-</div>
+</section>
 
-<div id="loading" class="screen"><div class="loader">Строим Ташкент…</div></div>
+<section id="loading" class="screen loading">
+  <div class="eyebrow">Toshkent</div>
+  <div class="bar"><i id="load-bar"></i></div>
+  <div class="muted" id="load-text">Загрузка машин…</div>
+</section>
 
 <script type="module" src="js/main.js"></script>
 </body>

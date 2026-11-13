@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CARS, COLORS } from './cars.js';
 import { makeStaticCar, LEVEL_CENTER } from './world.js';
 
-const N = Math.PI / 2, S = -Math.PI / 2, E = 0, W = Math.PI;
+const N = Math.PI / 2, S = -Math.PI / 2, E = 0;
 const line = (x0, z0, x1, z1, step = 2) => {
   const n = Math.max(1, Math.round(Math.hypot(x1 - x0, z1 - z0) / step)), out = [];
   for (let i = 0; i <= n; i++) out.push([x0 + (x1 - x0) * i / n, z0 + (z1 - z0) * i / n]);
@@ -88,7 +88,7 @@ export class LevelRunner {
     const add = o => { this.obstacles.add(o); this.added.push(o); };
     let k = 0;
     for (const [x, z, h] of L.cars || []) {
-      const spec = CARS[[3, 4, 5, 0, 2, 7, 6][k % 7]], col = COLORS[(k * 5 + idx) % COLORS.length].hex; k++;
+      const spec = CARS[(k + idx) % CARS.length], col = (k * 7 + idx) % 5 === 0 ? COLORS[1 + (k % 3)].hex : COLORS[0].hex; k++;
       const c = makeStaticCar(spec, col, cx + x, cz + z, h);
       this.group.add(c.mesh); add(c.obstacle);
     }

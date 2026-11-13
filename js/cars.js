@@ -1,29 +1,28 @@
 import * as THREE from 'three';
 
-// Узбекский автопарк. Скорости в м/с, размеры в метрах.
+// Машины. Скорости в м/с, размеры в метрах.
+// model: сжатая glb-модель; paint: имя материала краски; rotY: поворот, чтобы перёд смотрел по +X.
 export const CARS = [
-  { id: 'matiz',  name: 'Matiz',   type: 'hatch', len: 3.50, wid: 1.50, hgt: 1.50, price: 0,     maxSpeed: 36, accel: 7.5, desc: 'Маленький, юркий, легко паркуется' },
-  { id: 'damas',  name: 'Damas',   type: 'van',   len: 3.40, wid: 1.40, hgt: 1.90, price: 4000,  maxSpeed: 30, accel: 6.0, desc: 'Легенда маршруток' },
-  { id: 'spark',  name: 'Spark',   type: 'hatch', len: 3.64, wid: 1.60, hgt: 1.52, price: 7000,  maxSpeed: 40, accel: 8.5, desc: 'Городской хэтчбек' },
-  { id: 'nexia',  name: 'Nexia',   type: 'sedan', len: 4.48, wid: 1.66, hgt: 1.42, price: 12000, maxSpeed: 46, accel: 9.0, desc: 'Народный седан' },
-  { id: 'cobalt', name: 'Cobalt',  type: 'sedan', len: 4.48, wid: 1.73, hgt: 1.51, price: 18000, maxSpeed: 48, accel: 9.5, desc: 'Самый популярный в Ташкенте' },
-  { id: 'gentra', name: 'Gentra',  type: 'sedan', len: 4.52, wid: 1.73, hgt: 1.45, price: 25000, maxSpeed: 52, accel: 10.5, desc: 'Комфорт и скорость' },
-  { id: 'tracker',name: 'Tracker', type: 'suv',   len: 4.27, wid: 1.79, hgt: 1.65, price: 35000, maxSpeed: 50, accel: 10.0, desc: 'Кроссовер для всего' },
-  { id: 'malibu', name: 'Malibu',  type: 'sedan', len: 4.92, wid: 1.85, hgt: 1.47, price: 55000, maxSpeed: 62, accel: 12.5, desc: 'Бизнес-класс' },
+  { id: 'matiz', name: 'Matiz', type: 'hatch', len: 3.50, wid: 1.50, hgt: 1.50, price: 0,    maxSpeed: 36, accel: 7.5,
+    model: 'models/matiz.glb', paint: 'material_1', rotY: Math.PI / 2, desc: 'Маленький и юркий' },
+  { id: 'damas', name: 'Damas', type: 'van',   len: 3.48, wid: 1.40, hgt: 1.90, price: 4000, maxSpeed: 30, accel: 6.0,
+    model: 'models/damas.glb', paint: 'material_3', rotY: Math.PI, desc: 'Легенда ташкентских маршруток' },
 ];
 
+export const CREDITS = [
+  'Chevrolet Damas — own.guest (Sketchfab), CC BY 4.0',
+  'Daewoo Matiz — Serial Designation N-0X0010010 (Sketchfab), CC BY 4.0',
+];
+
+// Белый первым: все машины с завода белые
 export const COLORS = [
-  { name: 'Белый',          hex: '#f2f2f0' },
-  { name: 'Серебро',        hex: '#b8bcc2' },
-  { name: 'Мокрый асфальт', hex: '#4a4f57' },
-  { name: 'Чёрный',         hex: '#141518' },
-  { name: 'Вишня',          hex: '#6e1022' },
-  { name: 'Красный',        hex: '#c8202a' },
-  { name: 'Синий',          hex: '#1d4fa8' },
-  { name: 'Бирюза',         hex: '#0f9fb3' },
-  { name: 'Зелёный',        hex: '#1e7a3a' },
-  { name: 'Бежевый',        hex: '#cdb894' },
-  { name: 'Жёлтый такси',   hex: '#f1c40f' },
+  { name: 'Белый',          hex: '#f4f4f2' },
+  { name: 'Серебро',        hex: '#b9bdc3' },
+  { name: 'Мокрый асфальт', hex: '#50555c' },
+  { name: 'Чёрный',         hex: '#16171a' },
+  { name: 'Вишня',          hex: '#5e1020' },
+  { name: 'Синий',          hex: '#1f3f8f' },
+  { name: 'Бежевый',        hex: '#cbb894' },
 ];
 
 export const carById = id => CARS.find(c => c.id === id) || CARS[0];
@@ -127,7 +126,7 @@ function archGeo(R) {
 }
 
 // Строит 3D модель. Передом смотрит по +X.
-export function buildCarMesh(spec, colorHex, plate = randomPlate()) {
+function buildProcCar(spec, colorHex, plate = randomPlate()) {
   const group = new THREE.Group();
   const prof = PROFILES[spec.type];
   const L = spec.len, W = spec.wid, sy = spec.hgt / prof.ref;
@@ -247,4 +246,130 @@ export function buildCarMesh(spec, colorHex, plate = randomPlate()) {
 
   group.userData = { wheels, lights, R, paint, wheelBase };
   return group;
+}
+
+// ---------- Настоящие 3D-модели ----------
+const templates = new Map();
+
+export async function loadCarModels() {
+  let GLTFLoader, MeshoptDecoder;
+  try {
+    ({ GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js'));
+    ({ MeshoptDecoder } = await import('three/addons/libs/meshopt_decoder.module.js'));
+    await MeshoptDecoder.ready;
+  } catch (e) { console.warn('glTF недоступен, используются простые модели', e); return; }
+  const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
+  await Promise.all(CARS.map(async spec => {
+    try {
+      const gltf = await loader.loadAsync(spec.model);
+      templates.set(spec.id, prepareTemplate(spec, gltf.scene));
+    } catch (e) { console.warn('Не удалось загрузить', spec.model, e); }
+  }));
+}
+
+function prepareTemplate(spec, scene) {
+  const inner = new THREE.Group(); inner.add(scene); inner.rotation.y = spec.rotY;
+  const wrap = new THREE.Group(); wrap.add(inner);
+  wrap.updateMatrixWorld(true);
+  let box = new THREE.Box3().setFromObject(wrap);
+  const size = box.getSize(new THREE.Vector3());
+  const k = spec.len / size.x;
+  inner.scale.setScalar(k);
+  wrap.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(wrap);
+  const c = box.getCenter(new THREE.Vector3());
+  inner.position.set(-c.x, -box.min.y, -c.z);
+  wrap.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(wrap);
+  const s2 = box.getSize(new THREE.Vector3());
+  spec.wid = s2.z; spec.hgt = s2.y;
+
+  wrap.traverse(o => {
+    if (!o.isMesh) return;
+    o.castShadow = true; o.receiveShadow = true;
+    if (o.material.name === spec.paint) o.userData.paint = true;
+    // прозрачные стёкла не должны отбрасывать тень
+    if (o.material.transparent) o.castShadow = false;
+  });
+
+  // Поиск колёс: низкие, круглые сбоку, узкие детали
+  const parts = new Map();
+  const tmp = new THREE.Box3(), cc = new THREE.Vector3(), ss = new THREE.Vector3();
+  const meshes = []; wrap.traverse(o => o.isMesh && meshes.push(o));
+  for (const m of meshes) {
+    tmp.setFromObject(m); tmp.getCenter(cc); tmp.getSize(ss);
+    const round = ss.y > 0.3 && ss.y < 0.85 && Math.abs(ss.x - ss.y) < ss.y * 0.25;
+    if (!round || cc.y > spec.hgt * 0.3 || Math.abs(cc.x) < spec.len * 0.15) continue;
+    const axle = ss.z > spec.wid * 0.5;          // колёса оси слиты в одну деталь
+    const key = `${Math.sign(cc.x)}${axle ? 'A' : Math.sign(cc.z)}`;
+    if (!parts.has(key)) parts.set(key, { meshes: [], box: new THREE.Box3() });
+    const p = parts.get(key); p.meshes.push(m); p.box.union(tmp);
+  }
+  const wheels = [];
+  const axles = [...parts.keys()].filter(k => k.endsWith('A')).length;
+  if (parts.size === 4 || (axles === 2 && parts.size === 2)) {
+    for (const [key, p] of parts) {
+      const pivot = new THREE.Group(); p.box.getCenter(pivot.position);
+      wrap.add(pivot); wrap.updateMatrixWorld(true);
+      for (const m of p.meshes) pivot.attach(m);
+      pivot.userData.wheel = { front: key[0] !== '-' && !key.endsWith('A') };
+    }
+  }
+  return { wrap, wheels };
+}
+
+const paintCache = new Map();
+function paintMaterial(base, hex) {
+  const key = base.uuid + hex;
+  if (!paintCache.has(key)) {
+    const m = base.clone(); m.color.set(hex);
+    if ('metalness' in m) { m.metalness = Math.min(m.metalness, 0.5); m.roughness = Math.min(m.roughness, 0.35); }
+    paintCache.set(key, m);
+  }
+  return paintCache.get(key);
+}
+
+export function buildCarMesh(spec, colorHex, plate) {
+  const t = templates.get(spec.id);
+  if (!t) return buildProcCar(spec, colorHex, plate);
+  const group = t.wrap.clone(true);
+  const wheels = [];
+  group.traverse(o => {
+    if (o.isMesh && o.userData.paint) o.material = paintMaterial(o.material, colorHex);
+    if (o.userData.wheel) wheels.push({ pivot: o, front: o.userData.wheel.front, single: true });
+  });
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(spec.len + 0.5, spec.wid + 0.5), shadowMat);
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.03; group.add(shadow);
+  group.userData = { wheels, lights: { brake: [] } };
+  return group;
+}
+const shadowMat = new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: 0.32, depthWrite: false });
+
+// Добавляет геометрию машины в общие «вёдра» по материалам (для стоящих машин, чтобы рисовать их одним вызовом)
+const _m = new THREE.Matrix4();
+export function addCarToBuckets(spec, colorHex, x, z, h, buckets) {
+  const mesh = buildCarMesh(spec, colorHex);
+  mesh.position.set(x, 0, z); mesh.rotation.y = h;
+  mesh.updateMatrixWorld(true);
+  mesh.traverse(o => {
+    if (!o.isMesh || o.material === shadowMat) return;
+    const g = toFloatGeometry(o.geometry, o.matrixWorld);
+    if (!buckets.has(o.material)) buckets.set(o.material, []);
+    buckets.get(o.material).push(g);
+  });
+  return { x, z, h, hl: spec.len / 2, hw: spec.wid / 2 };
+}
+
+export function toFloatGeometry(src, matrix) {
+  const g0 = src.index ? src.toNonIndexed() : src;
+  const g = new THREE.BufferGeometry();
+  const n = g0.attributes.position.count;
+  for (const [name, size] of [['position', 3], ['normal', 3], ['uv', 2]]) {
+    const a = g0.attributes[name], arr = new Float32Array(n * size);
+    if (a) for (let i = 0; i < n; i++) { arr[i * size] = a.getX(i); arr[i * size + 1] = a.getY(i); if (size === 3) arr[i * size + 2] = a.getZ(i); }
+    g.setAttribute(name, new THREE.BufferAttribute(arr, size));
+  }
+  if (!g0.attributes.normal) g.computeVertexNormals();
+  g.applyMatrix4(matrix);
+  return g;
 }

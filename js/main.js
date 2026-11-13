@@ -1,107 +1,71 @@
 import * as THREE from 'three';
-import { CARS, COLORS, carById, buildCarMesh, randomPlate } from './cars.js';
+import { CARS, COLORS, CREDITS, carById, buildCarMesh, randomPlate, loadCarModels } from './cars.js';
 import { Vehicle } from './physics.js';
-import { World, HALF, ROADS, SPAWN, LEVEL_CENTER } from './world.js';
+import { World, HALF, VLINES, HLINES, W, SW, RING_IN, RING_OUT, CANAL_X, CANAL_W, SPAWN, LEVEL_CENTER } from './world.js';
 import { LEVELS, LevelRunner } from './levels.js';
-import { Net } from './net.js';
 
 const $ = id => document.getElementById(id);
+const fmt = n => n.toLocaleString('ru-RU');
+const WHITE = COLORS[0].hex;
 
 // ---------- Сохранение ----------
-const SAVE_KEY = 'uzbcarparking-save-v1';
-const save = Object.assign({ money: 1500, owned: ['matiz'], car: 'matiz', colors: {}, stars: {}, name: '', plate: randomPlate() },
+const SAVE_KEY = 'uzbcarparking-save-v2';
+const save = Object.assign({ money: 1500, owned: ['matiz'], car: 'matiz', colors: {}, stars: {}, plate: randomPlate() },
   (() => { try { return JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; } catch { return {}; } })());
+if (!CARS.some(c => c.id === save.car)) save.car = 'matiz';
+save.owned = save.owned.filter(id => CARS.some(c => c.id === id)); if (!save.owned.includes('matiz')) save.owned.unshift('matiz');
 const persist = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch {} };
-const colorOf = id => save.colors[id] || '#f2f2f0';
+const colorOf = id => save.colors[id] || WHITE;          // все машины по умолчанию белые
 
 // ---------- Рендер ----------
-const canvas = $('game');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ canvas: $('game'), antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2500);
-scene.fog = new THREE.Fog(0xcfe3ee, 180, 1100);
-
-// небо-градиент
+const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 4000);
+scene.fog = new THREE.Fog(0xdfe6ea, 250, 2200);
 {
-  const g = new THREE.SphereGeometry(1800, 32, 16);
   const m = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { top: { value: new THREE.Color(0x3d8fd6) }, bottom: { value: new THREE.Color(0xdcebf2) } },
+    uniforms: { top: { value: new THREE.Color(0x6aa7d8) }, bottom: { value: new THREE.Color(0xe4ebef) } },
     vertexShader: 'varying vec3 p; void main(){ p = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
-    fragmentShader: 'uniform vec3 top; uniform vec3 bottom; varying vec3 p; void main(){ float t = clamp(p.y*1.6,0.,1.); gl_FragColor = vec4(mix(bottom, top, pow(t,0.7)),1.); }',
+    fragmentShader: 'uniform vec3 top; uniform vec3 bottom; varying vec3 p; void main(){ float t = clamp(p.y*1.8,0.,1.); gl_FragColor = vec4(mix(bottom, top, pow(t,0.6)),1.); }',
   });
-  const sky = new THREE.Mesh(g, m); sky.renderOrder = -1; scene.add(sky);
-  scene.userData.sky = sky;
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(3000, 32, 16), m); sky.renderOrder = -1; scene.add(sky); scene.userData.sky = sky;
 }
-scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x8a7a5a, 0.9));
-const sun = new THREE.DirectionalLight(0xfff1dc, 2.4);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, near: 1, far: 400 });
-sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
+scene.add(new THREE.HemisphereLight(0xdfeeff, 0x9a8a6a, 1.0));
+const sun = new THREE.DirectionalLight(0xfff0d8, 2.5);
+sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -80, right: 80, top: 80, bottom: -80, near: 1, far: 500 });
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04;
 scene.add(sun, sun.target);
-const SUN_OFF = new THREE.Vector3(80, 140, 50);
+const SUN_OFF = new THREE.Vector3(90, 160, 60);
 
-function resize() {
-  const w = innerWidth, h = innerHeight;
-  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
-}
+function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
-// ---------- Мир ----------
-const world = new World(scene);
-const levels = new LevelRunner(scene, world.obstacles);
-
-// ---------- Игрок ----------
-const player = new Vehicle(carById(save.car));
-let playerMesh = null;
-function rebuildPlayer() {
-  if (playerMesh) scene.remove(playerMesh);
-  player.setSpec(carById(save.car));
-  playerMesh = buildCarMesh(player.spec, colorOf(save.car), save.plate);
-  scene.add(playerMesh);
-  syncMesh(playerMesh, player, 0);
-}
-function syncMesh(mesh, v, dt) {
-  mesh.position.set(v.x, 0, v.z); mesh.rotation.y = v.h;
-  const ud = mesh.userData;
-  for (const w of ud.wheels) {
-    w.spin.rotation.z = v.wheelRot;
-    if (w.front) w.pivot.rotation.y = v.steer;
-  }
-  for (const m of ud.lights.brake) m.emissiveIntensity = v.braking ? 2.5 : 0.35;
-}
-player.reset(SPAWN.x, SPAWN.z, SPAWN.h);
-rebuildPlayer();
+let world, levels, player, playerMesh;
+const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
 
 // ---------- Ввод ----------
 const input = { up: false, down: false, left: false, right: false, brake: false, horn: false };
 const KEYS = { KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', Space: 'brake', KeyH: 'horn' };
 addEventListener('keydown', e => {
-  if (document.activeElement?.tagName === 'INPUT') {
-    if (e.code === 'Enter' && document.activeElement === $('chat-input')) sendChat();
-    if (e.code === 'Escape') document.activeElement.blur();
-    return;
-  }
-  if (KEYS[e.code]) { input[KEYS[e.code]] = true; e.preventDefault(); }
+  if (KEYS[e.code]) { input[KEYS[e.code]] = true; if (playing()) e.preventDefault(); }
+  if (e.code === 'Escape') { if (playing()) openMenu(); else if (!$('levels').hidden || !$('garage').hidden) closeSheets(); }
   if (!playing()) return;
   if (e.code === 'KeyC') cycleCam();
   if (e.code === 'KeyR') resetCar();
-  if (e.code === 'Escape') openMenu();
-  if (e.code === 'KeyT' && mode === 'online') { e.preventDefault(); const ci = $('chat-input'); ci.classList.remove('hidden'); ci.focus(); }
 });
 addEventListener('keyup', e => { if (KEYS[e.code]) input[KEYS[e.code]] = false; });
 addEventListener('blur', () => Object.keys(input).forEach(k => (input[k] = false)));
 
-const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
-if (isTouch) document.body.classList.add('touch');
+const isTouch = matchMedia('(pointer: coarse)').matches;
 document.querySelectorAll('#touch button').forEach(b => {
   const k = b.dataset.k;
   const on = e => { e.preventDefault(); b.classList.add('on'); if (k === 'cam') cycleCam(); else input[k] = true; audio.init(); };
@@ -116,43 +80,38 @@ const audio = {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     try {
       const ctx = this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const master = ctx.createGain(); master.gain.value = 0.5; master.connect(ctx.destination);
+      this.master = ctx.createGain(); this.master.gain.value = 0.45; this.master.connect(ctx.destination);
       this.eng = ctx.createOscillator(); this.eng.type = 'sawtooth';
-      this.eng2 = ctx.createOscillator(); this.eng2.type = 'square';
-      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 600;
+      this.eng2 = ctx.createOscillator(); this.eng2.type = 'triangle';
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520;
       this.engGain = ctx.createGain(); this.engGain.gain.value = 0;
-      this.eng.connect(lp); this.eng2.connect(lp); lp.connect(this.engGain); this.engGain.connect(master);
+      this.eng.connect(lp); this.eng2.connect(lp); lp.connect(this.engGain); this.engGain.connect(this.master);
       this.eng.start(); this.eng2.start();
-      this.horn = [ctx.createOscillator(), ctx.createOscillator()];
-      this.hornGain = ctx.createGain(); this.hornGain.gain.value = 0; this.hornGain.connect(master);
-      this.horn[0].frequency.value = 415; this.horn[1].frequency.value = 520;
-      for (const o of this.horn) { o.type = 'square'; o.connect(this.hornGain); o.start(); }
-      this.master = master;
+      this.hornGain = ctx.createGain(); this.hornGain.gain.value = 0; this.hornGain.connect(this.master);
+      for (const f of [415, 520]) { const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = f; o.connect(this.hornGain); o.start(); }
     } catch { this.ctx = null; }
   },
   update(speed, throttle, horn, active) {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime;
-    const rpm = 45 + (Math.abs(speed) % 14) * 7 + Math.abs(speed) * 1.2 + (throttle ? 15 : 0);
-    this.eng.frequency.setTargetAtTime(rpm, t, 0.05);
-    this.eng2.frequency.setTargetAtTime(rpm * 0.5, t, 0.05);
-    this.engGain.gain.setTargetAtTime(active ? 0.12 + (throttle ? 0.06 : 0) : 0, t, 0.1);
-    this.hornGain.gain.setTargetAtTime(horn && active ? 0.08 : 0, t, 0.02);
+    const t = this.ctx.currentTime, v = Math.abs(speed);
+    const rpm = 42 + (v % 12) * 7 + v * 1.1 + (throttle ? 14 : 0);
+    this.eng.frequency.setTargetAtTime(rpm, t, 0.05); this.eng2.frequency.setTargetAtTime(rpm * 0.5, t, 0.05);
+    this.engGain.gain.setTargetAtTime(active ? 0.1 + (throttle ? 0.05 : 0) : 0, t, 0.1);
+    this.hornGain.gain.setTargetAtTime(horn && active ? 0.07 : 0, t, 0.02);
   },
   thump(v) {
     if (!this.ctx) return;
-    const ctx = this.ctx, o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = 'triangle'; o.frequency.setValueAtTime(120, ctx.currentTime); o.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.25);
-    g.gain.setValueAtTime(Math.min(0.6, v / 15), ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-    o.connect(g); g.connect(this.master); o.start(); o.stop(ctx.currentTime + 0.3);
+    const c = this.ctx, o = c.createOscillator(), g = c.createGain();
+    o.type = 'triangle'; o.frequency.setValueAtTime(120, c.currentTime); o.frequency.exponentialRampToValueAtTime(40, c.currentTime + 0.25);
+    g.gain.setValueAtTime(Math.min(0.5, v / 15), c.currentTime); g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.3);
+    o.connect(g); g.connect(this.master); o.start(); o.stop(c.currentTime + 0.3);
   },
   ding() {
     if (!this.ctx) return;
-    const ctx = this.ctx;
+    const c = this.ctx;
     [660, 880, 1320].forEach((f, i) => {
-      const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f;
-      const t0 = ctx.currentTime + i * 0.12;
-      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.2, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+      const o = c.createOscillator(), g = c.createGain(); o.frequency.value = f; const t0 = c.currentTime + i * 0.12;
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
       o.connect(g); g.connect(this.master); o.start(t0); o.stop(t0 + 0.45);
     });
   },
@@ -160,402 +119,308 @@ const audio = {
 addEventListener('pointerdown', () => audio.init());
 addEventListener('keydown', () => audio.init());
 
+// ---------- Машина игрока ----------
+function rebuildPlayer() {
+  if (playerMesh) scene.remove(playerMesh);
+  player.setSpec(carById(save.car));
+  playerMesh = buildCarMesh(player.spec, colorOf(save.car), save.plate);
+  scene.add(playerMesh); syncMesh(playerMesh, player);
+}
+function syncMesh(mesh, v) {
+  mesh.position.set(v.x, 0, v.z); mesh.rotation.y = v.h;
+  for (const w of mesh.userData.wheels) {
+    if (w.single) w.pivot.rotation.set(0, w.front ? v.steer : 0, v.wheelRot);
+    else { w.spin.rotation.z = v.wheelRot; if (w.front) w.pivot.rotation.y = v.steer; }
+  }
+  for (const m of mesh.userData.lights.brake) m.emissiveIntensity = v.braking ? 2.5 : 0.35;
+}
+
 // ---------- Камера ----------
-const CAMS = [{ dist: 7.5, h: 3.0, look: 1.0 }, { dist: 13, h: 5.5, look: 1.0 }, { top: true }, { inside: true }];
-const CAM_NAMES = ['Камера: сзади', 'Камера: дальняя', 'Камера: сверху', 'Камера: из салона'];
-let camIdx = 0;
+const CAMS = [{ dist: 7, h: 2.8 }, { dist: 12, h: 5 }, { top: true }, { inside: true }];
+const CAM_NAMES = ['Камера сзади', 'Камера дальняя', 'Камера сверху', 'Вид из салона'];
+let camIdx = 0, camHeading = 0;
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
-let camHeading = 0;
 function cycleCam() { camIdx = (camIdx + 1) % CAMS.length; toast(CAM_NAMES[camIdx]); }
 function updateCamera(dt, snap = false) {
   const c = CAMS[camIdx];
-  const k = snap ? 1 : 1 - Math.exp(-dt * 5);
-  // камера смотрит по направлению движения (при заднем ходе не разворачивается резко)
   let dh = player.h - camHeading; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
   camHeading += dh * (snap ? 1 : 1 - Math.exp(-dt * 4));
   const fx = Math.cos(camHeading), fz = -Math.sin(camHeading);
   const want = new THREE.Vector3(), look = new THREE.Vector3(player.x, 1, player.z);
-  if (c.top) {
-    want.set(player.x - fx * 0.01, 32, player.z - fz * 0.01);
-  } else if (c.inside) {
-    const s = player.spec;
-    // водитель слева (левый руль), чуть позади середины
-    want.set(player.x - fx * s.len * 0.08 + fz * 0.35, s.hgt * 0.8, player.z - fz * s.len * 0.08 - fx * 0.35);
-    look.set(player.x + fx * 20, s.hgt * 0.7, player.z + fz * 20);
-    camPos.copy(want); camLook.copy(look);
+  if (c.inside) {
+    const s = player.spec, hx = Math.cos(player.h), hz = -Math.sin(player.h);
+    camPos.set(player.x - hx * s.len * 0.08 + hz * 0.32, s.hgt * 0.78, player.z - hz * s.len * 0.08 - hx * 0.32);
+    camLook.set(player.x + hx * 20, s.hgt * 0.7, player.z + hz * 20);
   } else {
-    want.set(player.x - fx * c.dist, c.h, player.z - fz * c.dist);
-    look.y = c.look;
+    if (c.top) want.set(player.x - fx * 0.01, 34, player.z - fz * 0.01);
+    else { want.set(player.x - fx * c.dist, c.h, player.z - fz * c.dist); look.y = 1; }
+    const k = snap ? 1 : 1 - Math.exp(-dt * 5);
+    camPos.lerp(want, k); camLook.lerp(look, k);
   }
-  if (!c.inside) { camPos.lerp(want, k); camLook.lerp(look, k); }
-  if (c.top) camera.up.set(fx, 0, fz); else camera.up.set(0, 1, 0);
-  camera.position.copy(camPos);
-  camera.lookAt(camLook);
+  camera.up.set(c.top ? fx : 0, c.top ? 0 : 1, c.top ? fz : 0);
+  camera.position.copy(camPos); camera.lookAt(camLook);
   playerMesh.visible = !c.inside;
 }
 
-// ---------- Миникарта ----------
+// ---------- Мини-карта ----------
 const mm = $('minimap'), mctx = mm.getContext('2d');
-const mapCanvas = document.createElement('canvas'); mapCanvas.width = mapCanvas.height = 840;
-{
-  const g = mapCanvas.getContext('2d'), S = 840 / (HALF * 2);
-  g.fillStyle = '#b8a27a'; g.fillRect(0, 0, 840, 840);
-  const colors = { park: '#5d8a3a', square: '#5d8a3a', apartments: '#7f9a62', offices: '#8a8f98', mahalla: '#c9ae80', madrasa: '#1b9ec9', gas: '#1e9e4a', autodrom: '#c8202a', parking: '#6a6d75', bazaar: '#e0a040' };
-  for (const b of world.blocks) { g.fillStyle = colors[b.type] || '#999'; g.fillRect((b.x - 53 + HALF) * S, (b.z - 53 + HALF) * S, 106 * S, 106 * S); }
-  g.fillStyle = '#3a3c40';
-  for (const r of ROADS) { g.fillRect((r - 7 + HALF) * S, 0, 14 * S, 840); g.fillRect(0, (r - 7 + HALF) * S, 840, 14 * S); }
+const MAP_PX = 1280, MS = MAP_PX / (HALF * 2);
+const mapCanvas = document.createElement('canvas'); mapCanvas.width = mapCanvas.height = MAP_PX;
+function drawMapBase() {
+  const g = mapCanvas.getContext('2d'), P = v => (v + HALF) * MS;
+  g.fillStyle = '#e6e2d8'; g.fillRect(0, 0, MAP_PX, MAP_PX);
+  g.fillStyle = '#cfdcc0'; for (const r of [[0, 0, RING_IN]]) { g.beginPath(); g.arc(P(r[0]), P(r[1]), r[2] * MS, 0, 7); g.fill(); }
+  g.fillStyle = '#9cc3cf'; g.fillRect(P(CANAL_X - CANAL_W / 2), 0, CANAL_W * MS, MAP_PX);
+  g.fillStyle = '#ffffff';
+  for (const v of VLINES) g.fillRect(P(v.x - W[v.t] / 2), P(-580 - 20), W[v.t] * MS, 1200 * MS);
+  for (const h of HLINES) g.fillRect(P(-580 - 20), P(h.z - W[h.t] / 2), 1200 * MS, W[h.t] * MS);
+  g.strokeStyle = '#ffffff'; g.lineWidth = (RING_OUT - RING_IN) * MS; g.beginPath(); g.arc(P(0), P(0), ((RING_IN + RING_OUT) / 2) * MS, 0, 7); g.stroke();
+  g.fillStyle = '#d4cfc3';
+  for (const l of world.labels) { g.beginPath(); g.arc(P(l.x), P(l.z), 4, 0, 7); g.fill(); }
 }
 function drawMinimap() {
-  const W = mm.width, s = 1.4; // пикселей на метр
+  const Wd = mm.width, s = 1.6;
   mctx.save();
-  mctx.fillStyle = '#223'; mctx.fillRect(0, 0, W, W);
-  mctx.translate(W / 2, W / 2);
-  mctx.rotate(-(Math.PI / 2 - camHeading) * (CAMS[camIdx].top ? 1 : 1));
-  const S = 840 / (HALF * 2);
-  mctx.scale(s / S, s / S);
-  mctx.drawImage(mapCanvas, -(player.x + HALF) * S, -(player.z + HALF) * S);
+  mctx.fillStyle = '#e6e2d8'; mctx.fillRect(0, 0, Wd, Wd);
+  mctx.translate(Wd / 2, Wd / 2); mctx.rotate(camHeading - Math.PI / 2); mctx.scale(s / MS, s / MS);
+  mctx.drawImage(mapCanvas, -(player.x + HALF) * MS, -(player.z + HALF) * MS);
   mctx.restore();
-  const toMap = (x, z) => {
-    const dx = (x - player.x) * s, dz = (z - player.z) * s, a = -(Math.PI / 2 - camHeading);
-    return [W / 2 + dx * Math.cos(a) - dz * Math.sin(a), W / 2 + dx * Math.sin(a) + dz * Math.cos(a)];
-  };
-  // цель уровня / другие игроки
-  const dot = (x, z, col, r = 5) => {
-    let [px, py] = toMap(x, z);
-    const d = Math.hypot(px - W / 2, py - W / 2), max = W / 2 - 8;
-    if (d > max) { px = W / 2 + (px - W / 2) * max / d; py = W / 2 + (py - W / 2) * max / d; }
+  const a = camHeading - Math.PI / 2;
+  const dot = (x, z, col, r) => {
+    const dx = (x - player.x) * s, dz = (z - player.z) * s;
+    let px = Wd / 2 + dx * Math.cos(a) - dz * Math.sin(a), py = Wd / 2 + dx * Math.sin(a) + dz * Math.cos(a);
+    const d = Math.hypot(px - Wd / 2, py - Wd / 2), max = Wd / 2 - 12;
+    if (d > max) { px = Wd / 2 + (px - Wd / 2) * max / d; py = Wd / 2 + (py - Wd / 2) * max / d; }
     mctx.fillStyle = col; mctx.beginPath(); mctx.arc(px, py, r, 0, 7); mctx.fill();
+    mctx.strokeStyle = '#fff'; mctx.lineWidth = 3; mctx.stroke();
   };
-  if (mode === 'level' && levels.spot) dot(levels.spot.x, levels.spot.z, '#3dff8c', 6);
-  if (mode === 'free') dot(LEVEL_CENTER.x, LEVEL_CENTER.z, '#ff4040', 5);
-  for (const r of remotes.values()) dot(r.cur.x, r.cur.z, '#ffd36b', 5);
-  // игрок
-  mctx.fillStyle = '#fff'; mctx.beginPath();
-  mctx.moveTo(W / 2, W / 2 - 9); mctx.lineTo(W / 2 + 6, W / 2 + 6); mctx.lineTo(W / 2, W / 2 + 3); mctx.lineTo(W / 2 - 6, W / 2 + 6); mctx.fill();
+  if (mode === 'level' && levels.spot) dot(levels.spot.x, levels.spot.z, '#1d9a5f', 9);
+  else dot(LEVEL_CENTER.x, LEVEL_CENTER.z, '#c23a2b', 7);
+  mctx.fillStyle = '#2b44c0'; mctx.strokeStyle = '#fff'; mctx.lineWidth = 3;
+  mctx.beginPath(); mctx.moveTo(Wd / 2, Wd / 2 - 14); mctx.lineTo(Wd / 2 + 10, Wd / 2 + 10); mctx.lineTo(Wd / 2, Wd / 2 + 5); mctx.lineTo(Wd / 2 - 10, Wd / 2 + 10); mctx.closePath(); mctx.stroke(); mctx.fill();
 }
 
-// ---------- Онлайн ----------
-const remotes = new Map();
-function nameSprite(name) {
-  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
-  const g = c.getContext('2d');
-  g.fillStyle = 'rgba(0,0,0,0.55)'; g.beginPath(); g.roundRect(8, 8, 240, 48, 20); g.fill();
-  g.fillStyle = '#fff'; g.font = 'bold 30px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(name, 128, 33);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false }));
-  s.scale.set(3, 0.75, 1); s.renderOrder = 10; return s;
-}
-const net = new Net({
-  onState(id, st) {
-    let r = remotes.get(id);
-    const car = typeof st.car === 'string' ? st.car : 'matiz';
-    const col = /^#[0-9a-f]{6}$/i.test(st.col) ? st.col : '#ffffff';
-    const name = String(st.name || 'Игрок').slice(0, 16);
-    if (!r || r.car !== car || r.col !== col || r.name !== name) {
-      if (r) scene.remove(r.mesh);
-      const spec = carById(car);
-      const mesh = buildCarMesh(spec, col, typeof st.plate === 'string' ? st.plate.slice(0, 12) : randomPlate());
-      const label = nameSprite(name); label.position.set(0, spec.hgt + 1, 0); mesh.add(label);
-      scene.add(mesh);
-      const v = { x: +st.x || 0, z: +st.z || 0, h: +st.h || 0, steer: 0, wheelRot: 0, braking: false };
-      r = { mesh, car, col, name, spec, cur: v, tgt: { ...v }, obb: { x: v.x, z: v.z, h: v.h, hl: spec.len / 2, hw: spec.wid / 2 } };
-      if (!remotes.has(id)) toast(`${name} в игре`);
-      remotes.set(id, r);
-    }
-    r.tgt = { x: +st.x || 0, z: +st.z || 0, h: +st.h || 0, s: +st.s || 0 };
-    r.cur.steer = +st.st || 0; r.cur.braking = !!st.b; r.last = performance.now();
-    updateOnlineInfo();
-  },
-  onLeave(id) { const r = remotes.get(id); if (r) { scene.remove(r.mesh); remotes.delete(id); toast(`${r.name} вышел`); } updateOnlineInfo(); },
-  onStatus(text) { if (text) toast(text); updateOnlineInfo(); },
-  onChat(name, text) { addChat(name, text); },
-});
-function updateRemotes(dt) {
-  const k = 1 - Math.exp(-dt * 10);
-  const now = performance.now();
-  player.extra = [];
-  for (const [id, r] of remotes) {
-    if (now - r.last > 8000) { net.h.onLeave(id); continue; }
-    const c = r.cur, t = r.tgt;
-    c.x += (t.x - c.x) * k; c.z += (t.z - c.z) * k;
-    let dh = t.h - c.h; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); c.h += dh * k;
-    c.wheelRot -= (t.s / r.spec.len) * dt * 4.5;
-    syncMesh(r.mesh, c, dt);
-    Object.assign(r.obb, { x: c.x, z: c.z, h: c.h });
-    player.extra.push(r.obb);
-  }
-}
-function updateOnlineInfo() {
-  const el = $('online-info');
-  if (mode !== 'online') { el.classList.add('hidden'); return; }
-  el.classList.remove('hidden');
-  el.textContent = `🌐 Комната ${net.code} · игроков: ${remotes.size + 1}`;
-}
-let netTimer = 0;
-function sendNet(dt) {
-  netTimer += dt;
-  if (netTimer < 1 / 15 || mode !== 'online') return;
-  netTimer = 0;
-  net.sendState({ x: +player.x.toFixed(2), z: +player.z.toFixed(2), h: +player.h.toFixed(3), s: +player.speed.toFixed(2), st: +player.steer.toFixed(2), b: player.braking ? 1 : 0,
-    car: save.car, col: colorOf(save.car), name: save.name || 'Игрок', plate: save.plate });
-}
-function addChat(name, text) {
-  const log = $('chat-log'); log.classList.remove('hidden');
-  const d = document.createElement('div');
-  const b = document.createElement('b'); b.textContent = name + ': ';
-  d.append(b, document.createTextNode(text));
-  log.append(d);
-  while (log.children.length > 6) log.firstChild.remove();
-  setTimeout(() => d.remove(), 15000);
-}
-function sendChat() {
-  const ci = $('chat-input'), text = ci.value.trim();
-  if (text) { net.sendChat(save.name || 'Игрок', text); addChat(save.name || 'Я', text); }
-  ci.value = ''; ci.blur(); ci.classList.add('hidden');
-}
-
-// ---------- UI ----------
-let mode = 'menu'; // menu | free | level | online | garage
-let prevPlayMode = null, paused = true;
-const playing = () => ['free', 'level', 'online'].includes(mode) && !paused;
-const screens = ['menu', 'levels', 'garage', 'online', 'result', 'loading'];
-function show(id) { for (const s of screens) $(s).classList.toggle('hidden', s !== id); }
+// ---------- Режимы и экраны ----------
+let mode = 'menu';              // menu | free | level | garage
+let paused = true, inRun = false;
+const playing = () => (mode === 'free' || mode === 'level') && !paused;
+const SCREENS = ['menu', 'levels', 'garage', 'result', 'loading'];
+function show(id) { for (const s of SCREENS) $(s).hidden = s !== id; }
 let toastT;
-function toast(text) { const t = $('toast'); t.textContent = text; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2200); }
-function updateMoney() { for (const id of ['money', 'menu-money', 'garage-money']) $(id).textContent = save.money.toLocaleString('ru-RU'); $('menu-car').textContent = carById(save.car).name; }
+function toast(text, ms = 2200) { const t = $('toast'); t.textContent = text; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); }
+function updateMoney() {
+  $('money').textContent = `${fmt(save.money)} сум`;
+  $('menu-money').textContent = `${fmt(save.money)} сум · ${carById(save.car).name}`;
+  $('garage-money').textContent = `На счету ${fmt(save.money)} сум`;
+}
 
 function enterPlay(m) {
-  mode = m; paused = false; prevPlayMode = m;
-  show(null); $('hud').classList.remove('hidden');
-  $('touch').classList.toggle('hidden', !isTouch);
-  $('level-panel').classList.toggle('hidden', m !== 'level');
-  updateOnlineInfo(); updateMoney();
-  $('btn-resume').classList.remove('hidden');
+  mode = m; paused = false; inRun = true;
+  show(null); $('hud').hidden = false; $('touch').hidden = !isTouch;
+  $('level-panel').hidden = m !== 'level';
+  $('btn-play').firstChild.textContent = 'Продолжить ';
+  updateMoney();
 }
 function openMenu() {
-  paused = true; mode = 'menu';
-  if (prevPlayMode === 'online') mode = 'online';
-  if (prevPlayMode === 'level') mode = 'level';
-  $('hud').classList.add('hidden'); $('touch').classList.add('hidden');
+  paused = true;
+  $('hud').hidden = true; $('touch').hidden = true;
   show('menu'); updateMoney();
 }
-function resetCar() {
-  if (mode === 'level') { startLevel(levels.idx); return; }
-  // ставим на ближайшую дорогу
-  const near = a => ROADS.reduce((b, r) => (Math.abs(r - a) < Math.abs(b - a) ? r : b), ROADS[0]);
-  const rx = near(player.x), rz = near(player.z);
-  if (Math.abs(rx - player.x) < Math.abs(rz - player.z)) player.reset(rx + 3.5, player.z, Math.PI / 2);
-  else player.reset(player.x, rz + 3.5, 0);
-  camHeading = player.h; updateCamera(0, true);
+function closeSheets() {
+  if (mode === 'garage') leaveGarage();
+  show('menu');
 }
 
-function closeOnline() {
-  net.close();
-  for (const id of [...remotes.keys()]) net.h.onLeave(id);
-  $('chat-log').classList.add('hidden');
+function resetCar() {
+  if (mode === 'level') { startLevel(levels.idx); return; }
+  player.reset(SPAWN.x, SPAWN.z, SPAWN.h); camHeading = player.h; updateCamera(0, true);
 }
 
 function startFree() {
   levels.clear();
-  if (prevPlayMode === 'online') closeOnline();
   player.reset(SPAWN.x, SPAWN.z, SPAWN.h); camHeading = player.h; updateCamera(0, true);
-  enterPlay('free'); toast('Свободная езда — красная точка на карте: Автодром');
+  enterPlay('free');
+  toast(isTouch ? 'Красная точка на карте — автодром' : 'WASD — ехать · Пробел — ручник · C — камера', 4000);
 }
 
 function startLevel(i) {
-  if (prevPlayMode === 'online') closeOnline();
   levels.clear();
   const st = levels.start(i, player.spec);
   player.reset(st.x, st.z, st.h); camHeading = player.h; updateCamera(0, true);
-  $('lvl-name').textContent = `${i + 1}. ${LEVELS[i].name}`;
+  $('lvl-name').textContent = `${i + 1} / ${LEVELS.length}`;
   $('lvl-hint').textContent = LEVELS[i].desc;
   enterPlay('level');
 }
 
-function levelUnlocked(i) { return i === 0 || (save.stars[i - 1] || 0) > 0; }
+$('btn-play').onclick = () => { if (inRun) enterPlay(mode === 'level' ? 'level' : 'free'); else startFree(); };
+$('btn-levels').onclick = () => { renderLevels(); show('levels'); };
+$('btn-garage').onclick = openGarage;
+$('btn-pause').onclick = openMenu;
+$('btn-credits').onclick = () => { const c = $('credits'); c.hidden = !c.hidden; };
+document.querySelectorAll('[data-close]').forEach(b => (b.onclick = closeSheets));
+
+// уровни
+const unlocked = i => i === 0 || (save.stars[i - 1] || 0) > 0;
 function renderLevels() {
   const g = $('level-grid'); g.innerHTML = '';
+  const firstOpen = LEVELS.findIndex((_, i) => unlocked(i) && !save.stars[i]);
   LEVELS.forEach((L, i) => {
-    const b = document.createElement('button'); b.className = 'level-card'; b.disabled = !levelUnlocked(i);
+    const b = document.createElement('button');
+    b.className = 'tile' + (i === firstOpen ? ' next' : ''); b.disabled = !unlocked(i); b.title = L.name;
     const st = save.stars[i] || 0;
-    b.innerHTML = `<span class="num">${i + 1}</span><span class="t"></span><span class="d"></span><span class="s">${'★'.repeat(st)}${'☆'.repeat(3 - st)}</span><span class="d">💰 ${L.reward}</span>`;
-    b.querySelector('.t').textContent = b.disabled ? '🔒 ' + L.name : L.name;
-    b.querySelectorAll('.d')[0].textContent = L.desc;
+    b.innerHTML = `<b>${i + 1}</b><span class="dots">${[0, 1, 2].map(k => `<i class="${k < st ? 'on' : ''}"></i>`).join('')}</span>`;
     b.onclick = () => startLevel(i);
     g.append(b);
   });
 }
-
+const starSvg = on => `<svg viewBox="0 0 24 24" class="${on ? 'on' : ''}"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z"/></svg>`;
 function finishLevel(res) {
   paused = true;
   const i = levels.idx, L = LEVELS[i];
-  $('hud').classList.add('hidden'); $('touch').classList.add('hidden');
+  $('hud').hidden = true; $('touch').hidden = true;
   show('result');
   if (res === 'win') {
     audio.ding();
-    const stars = levels.stars();
-    const first = !(save.stars[i] > 0);
+    const stars = levels.stars(), first = !(save.stars[i] > 0);
     const reward = Math.round(L.reward * (first ? 1 : 0.3) * (0.6 + stars * 0.15));
-    save.stars[i] = Math.max(save.stars[i] || 0, stars);
-    save.money += reward; persist(); updateMoney();
-    $('res-title').textContent = 'Отлично припарковался!';
-    $('res-stars').textContent = '★'.repeat(stars) + '☆'.repeat(3 - stars);
-    $('res-text').textContent = `Касаний: ${levels.hits} · Осталось ${Math.ceil(levels.timeLeft)} с · +${reward.toLocaleString('ru-RU')} сум`;
-    $('res-next').classList.toggle('hidden', i >= LEVELS.length - 1);
+    save.stars[i] = Math.max(save.stars[i] || 0, stars); save.money += reward; persist(); updateMoney();
+    $('res-title').textContent = 'Припарковался';
+    $('res-stars').innerHTML = [0, 1, 2].map(k => starSvg(k < stars)).join('');
+    $('res-text').textContent = `+${fmt(reward)} сум · касаний ${levels.hits} · ${Math.ceil(levels.timeLeft)} с в запасе`;
+    $('res-next').hidden = i >= LEVELS.length - 1;
   } else {
     $('res-title').textContent = 'Время вышло';
-    $('res-stars').textContent = '☆☆☆';
-    $('res-text').textContent = 'Попробуй ещё раз — не спеши и используй камеру сверху (C).';
-    $('res-next').classList.add('hidden');
+    $('res-stars').innerHTML = [0, 1, 2].map(() => starSvg(false)).join('');
+    $('res-text').textContent = 'Не спеши и включи камеру сверху (C)';
+    $('res-next').hidden = true;
   }
 }
-$('res-menu').onclick = () => { levels.clear(); prevPlayMode = null; $('btn-resume').classList.add('hidden'); mode = 'menu'; show('menu'); };
 $('res-retry').onclick = () => startLevel(levels.idx);
 $('res-next').onclick = () => startLevel(levels.idx + 1);
+$('res-menu').onclick = () => { levels.clear(); inRun = false; mode = 'menu'; $('btn-play').firstChild.textContent = 'Поехать '; show('menu'); };
 
 // гараж
-let garageSel = save.car, garageColor = null;
-function renderGarage() {
-  const list = $('car-list'); list.innerHTML = '';
-  const maxS = Math.max(...CARS.map(c => c.maxSpeed)), maxA = Math.max(...CARS.map(c => c.accel));
-  for (const c of CARS) {
-    const b = document.createElement('button'); b.className = 'car-item' + (c.id === garageSel ? ' sel' : '');
-    const owned = save.owned.includes(c.id);
-    b.innerHTML = `<b></b>${owned ? `<span class="owned">${c.id === save.car ? '✔ Выбрана' : 'Куплена'}</span>` : `<span class="price">${c.price.toLocaleString('ru-RU')} сум</span>`}<small></small>
-      <div class="bars"><span>Скорость<i style="width:${(c.maxSpeed / maxS) * 100}%"></i></span><span>Разгон<i style="width:${(c.accel / maxA) * 100}%"></i></span><span>Размер<i style="width:${(c.len / 5) * 100}%"></i></span></div>`;
-    b.querySelector('b').textContent = 'Chevrolet ' + c.name;
-    b.querySelector('small').textContent = c.desc;
-    b.onclick = () => { garageSel = c.id; garageColor = null; previewGarage(); renderGarage(); };
-    list.append(b);
-  }
-  const cl = $('color-list'); cl.innerHTML = '';
-  const cur = garageColor || colorOf(garageSel);
-  for (const col of COLORS) {
-    const b = document.createElement('button'); b.style.background = col.hex; b.title = col.name;
-    if (col.hex === cur) b.className = 'sel';
-    b.onclick = () => { garageColor = col.hex; previewGarage(); renderGarage(); };
-    cl.append(b);
-  }
-  const btn = $('btn-buy'), c = carById(garageSel), owned = save.owned.includes(c.id);
-  if (!owned) { btn.textContent = `Купить за ${c.price.toLocaleString('ru-RU')} сум`; btn.disabled = save.money < c.price; }
-  else if (garageColor && garageColor !== colorOf(c.id)) { btn.textContent = 'Покрасить за 200 сум'; btn.disabled = save.money < 200; }
-  else { btn.textContent = c.id === save.car ? 'Поехали!' : 'Выбрать'; btn.disabled = false; }
-  updateMoney();
+let garageSel, garageColor, garageMesh, prevMode;
+function openGarage() {
+  prevMode = mode; mode = 'garage'; paused = true;
+  garageSel = save.car; garageColor = null;
+  show('garage'); previewGarage(); renderGarage();
 }
-let garageMesh = null;
+function leaveGarage() {
+  if (garageMesh) { scene.remove(garageMesh); garageMesh = null; }
+  playerMesh.visible = true;
+  mode = prevMode === 'garage' ? 'menu' : prevMode;
+}
 function previewGarage() {
   if (garageMesh) scene.remove(garageMesh);
   garageMesh = buildCarMesh(carById(garageSel), garageColor || colorOf(garageSel), save.plate);
   garageMesh.position.set(player.x, 0, player.z); garageMesh.rotation.y = player.h;
   scene.add(garageMesh); playerMesh.visible = false;
 }
+function renderGarage() {
+  const tabs = $('car-tabs'); tabs.innerHTML = '';
+  for (const c of CARS) {
+    const b = document.createElement('button'); b.textContent = c.name; b.className = c.id === garageSel ? 'on' : '';
+    b.onclick = () => { garageSel = c.id; garageColor = null; previewGarage(); renderGarage(); };
+    tabs.append(b);
+  }
+  const c = carById(garageSel), owned = save.owned.includes(c.id);
+  $('car-desc').textContent = c.desc;
+  $('car-specs').innerHTML = `<div><b>${Math.round(c.maxSpeed * 3.6)}</b><span>км/ч</span></div><div><b>${c.len.toFixed(1)}</b><span>длина, м</span></div><div><b>${owned ? '—' : fmt(c.price)}</b><span>${owned ? 'в гараже' : 'сум'}</span></div>`;
+  const cl = $('color-list'); cl.innerHTML = '';
+  const cur = garageColor || colorOf(garageSel);
+  for (const col of COLORS) {
+    const b = document.createElement('button'); b.style.background = col.hex; b.title = col.name; b.setAttribute('aria-label', col.name);
+    if (col.hex === cur) b.className = 'on';
+    b.onclick = () => { garageColor = col.hex; previewGarage(); renderGarage(); };
+    cl.append(b);
+  }
+  const btn = $('btn-buy');
+  if (!owned) { btn.textContent = `Купить за ${fmt(c.price)} сум`; btn.disabled = save.money < c.price; }
+  else if (garageColor && garageColor !== colorOf(c.id)) { btn.textContent = 'Покрасить за 200 сум'; btn.disabled = save.money < 200; }
+  else { btn.textContent = c.id === save.car ? 'Поехали' : 'Выбрать'; btn.disabled = false; }
+  updateMoney();
+}
 $('btn-buy').onclick = () => {
   const c = carById(garageSel), owned = save.owned.includes(c.id);
   if (!owned) {
     if (save.money < c.price) return;
     save.money -= c.price; save.owned.push(c.id); if (garageColor) save.colors[c.id] = garageColor;
-    save.car = c.id; toast(`Поздравляем с покупкой ${c.name}!`); audio.ding();
+    save.car = c.id; toast(`${c.name} теперь ваша`); audio.ding();
   } else if (garageColor && garageColor !== colorOf(c.id)) {
     if (save.money < 200) return;
-    save.money -= 200; save.colors[c.id] = garageColor; save.car = c.id; garageColor = null; toast('Покрашено!');
+    save.money -= 200; save.colors[c.id] = garageColor; save.car = c.id; garageColor = null; toast('Покрашено');
   } else {
-    save.car = c.id; persist(); closeGarage(); return;
+    save.car = c.id; persist(); rebuildPlayer(); leaveGarage();
+    if (inRun) enterPlay(mode === 'level' ? 'level' : 'free'); else startFree();
+    return;
   }
   persist(); rebuildPlayer(); previewGarage(); renderGarage();
 };
-function openGarage() {
-  if (prevPlayMode === 'level') { levels.clear(); prevPlayMode = null; $('btn-resume').classList.add('hidden'); }
-  mode = 'garage'; paused = true; garageSel = save.car; garageColor = null;
-  show('garage'); previewGarage(); renderGarage();
-}
-function closeGarage() {
-  if (garageMesh) { scene.remove(garageMesh); garageMesh = null; }
-  rebuildPlayer(); playerMesh.visible = true;
-  if (prevPlayMode) enterPlay(prevPlayMode); else startFree();
-}
-
-document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => {
-  const g = b.dataset.go;
-  if (g === 'free') startFree();
-  else if (g === 'levels') { renderLevels(); show('levels'); }
-  else if (g === 'online') { $('player-name').value = save.name; $('online-status').textContent = ''; show('online'); }
-  else if (g === 'garage') openGarage();
-  else if (g === 'resume') { if (prevPlayMode) enterPlay(prevPlayMode); }
-  else if (g === 'menu') {
-    if (mode === 'garage') { if (garageMesh) { scene.remove(garageMesh); garageMesh = null; } playerMesh.visible = true; mode = 'menu'; }
-    show('menu'); updateMoney();
-  }
-}));
-$('btn-pause').onclick = openMenu;
-
-async function goOnline(host) {
-  const name = $('player-name').value.trim().slice(0, 16);
-  if (!name) { $('online-status').textContent = 'Введи имя'; return; }
-  save.name = name; persist();
-  const code = host ? Net.randomCode() : $('room-code').value.trim().toUpperCase();
-  if (!host && code.length !== 4) { $('online-status').textContent = 'Код из 4 символов'; return; }
-  if (!window.Peer) { $('online-status').textContent = 'Онлайн-модуль не загрузился'; return; }
-  $('online-status').textContent = host ? 'Создаём комнату…' : 'Подключаемся…';
-  if (levels.active) levels.clear();
-  net.close();
-  try {
-    await (host ? net.host(code) : net.join(code));
-    player.reset(SPAWN.x + (Math.random() - 0.5) * 6, SPAWN.z + Math.random() * 30, SPAWN.h); camHeading = player.h; updateCamera(0, true);
-    enterPlay('online');
-    toast(host ? `Комната ${code} — отправь код друзьям` : `Ты в комнате ${code}`);
-  } catch (e) {
-    net.close();
-    $('online-status').textContent = 'Ошибка: ' + (e.message || e.type || e);
-  }
-}
-$('btn-host').onclick = () => goOnline(true);
-$('btn-join').onclick = () => goOnline(false);
 
 // ---------- Цикл ----------
 const clock = new THREE.Clock();
-let t = 0, menuAngle = 0;
+let t = 0, orbit = 0;
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05); t += dt;
-  if (playing()) {
-    const hit = player.update(dt, input, world.obstacles, HALF + 30);
+  if (window.__freeCam) {
+    window.__freeCam(camera);
+  } else if (playing()) {
+    const hit = player.update(dt, input, world.obstacles, HALF - 10);
     if (hit > 1.2) audio.thump(hit);
     if (mode === 'level') {
       const r = levels.update(dt, player, hit, t);
-      $('lvl-time').textContent = Math.max(0, Math.ceil(levels.timeLeft));
+      const tl = Math.max(0, Math.ceil(levels.timeLeft));
+      $('lvl-time').textContent = `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}`;
       $('lvl-hits').textContent = levels.hits;
-      const h = $('lvl-hint');
-      h.classList.toggle('ok', !!levels.inside);
-      h.textContent = levels.inside ? (Math.abs(player.speed) < 0.4 ? 'Держи… ✓' : 'Остановись!') : LEVELS[levels.idx].desc;
+      const h = $('lvl-hint'); h.classList.toggle('ok', !!levels.inside);
+      h.textContent = levels.inside ? (Math.abs(player.speed) < 0.4 ? 'Стоим…' : 'Остановись') : LEVELS[levels.idx].desc;
       if (r) finishLevel(r);
     }
-    syncMesh(playerMesh, player, dt);
+    syncMesh(playerMesh, player);
     updateCamera(dt);
     $('speed').textContent = Math.round(Math.abs(player.speed) * 3.6);
     $('gear').textContent = player.speed < -0.2 ? 'R' : Math.abs(player.speed) < 0.2 ? 'N' : 'D';
     drawMinimap();
   } else if (mode === 'garage') {
-    menuAngle += dt * 0.35;
-    const r = 7;
+    orbit += dt * 0.3;
     camera.up.set(0, 1, 0);
-    camera.position.set(player.x + Math.cos(menuAngle) * r, 2.2, player.z + Math.sin(menuAngle) * r);
-    camera.lookAt(player.x - (innerWidth > 700 ? 0 : 0), 0.7, player.z);
-  } else {
-    menuAngle += dt * 0.08;
+    const wide = innerWidth > 720, R = wide ? 7.5 : 9;
+    camera.position.set(player.x + Math.cos(orbit) * R, 2.4, player.z + Math.sin(orbit) * R);
+    // машина левее центра на широком экране (справа панель) и выше на телефоне (снизу панель)
+    const rx = -Math.sin(orbit), rz = Math.cos(orbit), side = wide ? -2.2 : 0;
+    camera.lookAt(player.x + rx * side, wide ? 0.8 : -0.6, player.z + rz * side);
+  } else if (world) {
+    orbit += dt * 0.05;     // в меню камера медленно облетает машину на фоне сквера
     camera.up.set(0, 1, 0);
-    camera.position.set(player.x + Math.cos(menuAngle) * 14, 4.5, player.z + Math.sin(menuAngle) * 14);
-    camera.lookAt(player.x, 1.2, player.z);
+    camera.position.set(player.x + Math.cos(orbit) * 16, 5.5, player.z + Math.sin(orbit) * 16);
+    camera.lookAt(player.x, 2.5, player.z);
   }
-  if (mode === 'online' || remotes.size) updateRemotes(dt);
-  sendNet(dt);
-  audio.update(player.speed, input.up || input.down, input.horn, playing());
-  sun.position.set(player.x + SUN_OFF.x, SUN_OFF.y, player.z + SUN_OFF.z);
-  sun.target.position.set(player.x, 0, player.z);
+  audio.update(player ? player.speed : 0, input.up || input.down, input.horn, playing());
+  if (player) { sun.position.set(player.x + SUN_OFF.x, SUN_OFF.y, player.z + SUN_OFF.z); sun.target.position.set(player.x, 0, player.z); }
   scene.userData.sky.position.copy(camera.position);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 
-updateMoney();
-show('menu');
-requestAnimationFrame(frame);
-window.__game = { player, world, levels, save, startLevel, startFree, input };
+// ---------- Запуск ----------
+(async function boot() {
+  show('loading');
+  $('load-bar').style.width = '15%';
+  await loadCarModels();
+  $('load-bar').style.width = '55%'; $('load-text').textContent = 'Строим Ташкент…';
+  await nextFrame();
+  world = new World(scene);
+  levels = new LevelRunner(scene, world.obstacles);
+  player = new Vehicle(carById(save.car));
+  player.reset(SPAWN.x, SPAWN.z, SPAWN.h); camHeading = player.h;
+  rebuildPlayer();
+  drawMapBase();
+  $('credits').textContent = CREDITS.join(' · ');
+  $('load-bar').style.width = '100%';
+  await nextFrame();
+  updateMoney();
+  show('menu');
+  requestAnimationFrame(frame);
+  window.__game = { player, world, levels, save, startLevel, startFree, input, camera };
+})();
