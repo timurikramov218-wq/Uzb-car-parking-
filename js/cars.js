@@ -19,6 +19,8 @@ export const CREDITS = [
   'Daewoo Nexia — Villanueva-Jonatan-32621 (Sketchfab), CC BY 4.0',
   'Chevrolet Malibu — Ddiaz Design (Sketchfab), CC BY 4.0',
   'Tashkent Tower — nuraliblender (Sketchfab), CC BY 4.0',
+  'Low poly gas station — assetfactory (Sketchfab), Sketchfab Standard',
+  'City Park at Sunset — Virginia Vidonis (Sketchfab), CC BY 4.0',
 ];
 
 // Белый первым: все машины с завода белые
@@ -271,7 +273,7 @@ export async function loadCarModels() {
     const b64 = window.__MODEL_DATA && window.__MODEL_DATA[id];
     return b64 ? loader.parseAsync(Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer, '') : loader.loadAsync(url);
   };
-  const extras = [['tashkent_tower', 'models/tashkent_tower.glb']].map(async ([id, url]) => {
+  const extras = [['tashkent_tower', 'models/tashkent_tower.glb'], ['gas_shell', 'models/city/gas_shell.glb'], ['park_square', 'models/city/park_square.glb']].map(async ([id, url]) => {
     try { extraModels.set(id, (await load(id, url)).scene); } catch (e) { console.warn('Нет модели', url, e); }
   });
   await Promise.all([...extras, ...CARS.map(async spec => {

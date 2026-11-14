@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { World, M, T, rnd, rr, pick, uvs, canvasTex, normalFrom } from './world.js';
 import { CARS, extraModels, addCarToBuckets } from './cars.js';
 import { satOBB } from './physics.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 export const CITY_HALF = 1600;                         // граница, дальше машина не уедет
 export const CITY_LEVEL = { x: 1020, z: 980 };          // автодром для уровней
@@ -140,7 +141,7 @@ export class City extends World {
       for (const n of this.nodes) q.push(() => this.buildJunction(n));
       q.push(() => this.buildPlaces());
       q.push(() => {
-        this.lots = []; this.lotGrid = new SegHash(60); this.lotCount = { gas: 0, service: 0, tune: 0 };
+        this.lots = []; this.lotGrid = new SegHash(60); this.lotCount = { gas: 0, service: 0, tune: 0, square: 0 };
         for (const e of this.edges.filter(e => e.kind === 'ground' || e.kind === 'bridge').sort(() => rnd() - 0.5)) q.push(() => this.lotsAlong(e));
         q.push(() => this.scatter());
         q.push(() => {          // въезды в сервисы и на заправки свободны: убираем деревья и фонари перед ними
@@ -757,6 +758,7 @@ export class City extends World {
   lotKind(D, e) {
     const main = e && e.type === 'main', r = rnd(), C = this.lotCount;
     if (main && C.gas < 9 && r < 0.07) return { type: 'gas', w: 34, d: 26, back: 4 };
+    if (C.square < 7 && r > 0.115 && r < 0.14 && (D.kind === 'down' || D.kind === 'mid' || D.kind === 'old') && this.modelParts('park_square')) return { type: 'square', w: 54, d: 70, back: 3 };
     if (main && C.service < 6 && r > 0.07 && r < 0.1 && D.kind !== 'down') return { type: 'service', w: 30, d: 22, back: 4 };
     if (main && C.tune < 3 && r > 0.1 && r < 0.115) return { type: 'tune', w: 30, d: 22, back: 4 };
     if (e && r > 0.965) return { type: 'parking', w: rr(30, 50), d: rr(20, 34), back: 1 };
@@ -821,7 +823,8 @@ export class City extends World {
         }
         this.fenceRot(x, z, w, d, rot, face);
         break;
-      case 'gas': this.gasStation(x, z, w, d, rot, face); break;
+      case 'gas': if (this.modelParts('gas_shell')) { const c2 = Math.cos(rot), s2 = Math.sin(rot); this.quad(M.asphalt, x, 0.04, z, w, d, rot, w / 12, d / 12); this.shellStation(x + s2 * face * 1, z + c2 * face * 1, rot, face); } else this.gasStation(x, z, w, d, rot, face); break;
+      case 'square': this.parkSquare(x, z, rot); break;
       case 'service': this.serviceShop(x, z, w, d, rot, face, false); break;
       case 'tune': this.serviceShop(x, z, w, d, rot, face, true); break;
       case 'parking': this.parkingLot(x, z, rot, w, d); break;
@@ -932,6 +935,81 @@ export class City extends World {
     const pool = CARS.filter(c => c.lod).flatMap(c => Array(c.parked || 1).fill(c)), spec = pick(pool);
     const col = rnd() < 0.7 ? '#f4f4f2' : pick(['#b9bdc3', '#50555c', '#16171a', '#7a1f2b', '#1f3f7a']);
     this.obstacles.add(addCarToBuckets(spec, col, x, z, h, this.carBuckets));
+  }
+
+  // ---------- готовые 3D-модели: склеиваем по материалам один раз, потом ставим копии в общие пачки ----------
+  modelParts(id) {
+    (this._mp ||= {});
+    if (this._mp[id] !== undefined) return this._mp[id];
+    const sc = extraModels.get(id); if (!sc) return (this._mp[id] = null);
+    sc.updateMatrixWorld(true);
+    const by = new Map();
+    sc.traverse(o => {
+      if (!o.isMesh) return;
+      let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      const out = new THREE.BufferGeometry();               // всё в обычные float32: квантованные атрибуты не склеиваются с остальными
+      for (const k of ['position', 'normal', 'uv']) { const a = g.attributes[k]; if (!a) continue; const n = a.itemSize, arr = new Float32Array(a.count * n); for (let i = 0; i < a.count; i++) for (let c = 0; c < n; c++) arr[i * n + c] = a.getComponent(i, c); out.setAttribute(k, new THREE.BufferAttribute(arr, n)); }
+      const m = o.material; m.side = THREE.FrontSide;
+      if (!by.has(m)) by.set(m, []);
+      if (o.isInstancedMesh) {                             // одинаковые объекты сохранены как копии одного: разворачиваем все
+        const im = new THREE.Matrix4();
+        for (let i = 0; i < o.count; i++) { o.getMatrixAt(i, im); by.get(m).push(out.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(o.matrixWorld, im))); }
+      } else by.get(m).push(out.applyMatrix4(o.matrixWorld));
+    });
+    const parts = []; for (const [m, list] of by) parts.push({ m, g: mergeGeometries(list) });
+    const box = new THREE.Box3(); for (const p of parts) { p.g.computeBoundingBox(); box.union(p.g.boundingBox); }
+    return (this._mp[id] = { parts, box });
+  }
+  // матрица модели: центр по x/z в точку, поворот, масштаб
+  modelMatrix(id, x, z, rotY, scale, center) {
+    const mp = this.modelParts(id), c = center || mp.box.getCenter(new THREE.Vector3());
+    return new THREE.Matrix4().makeTranslation(x, 0, z).multiply(new THREE.Matrix4().makeRotationY(rotY)).multiply(new THREE.Matrix4().makeScale(scale, scale, scale)).multiply(new THREE.Matrix4().makeTranslation(-c.x, -mp.box.min.y, -c.z));
+  }
+  placeModel(id, M4) { for (const p of this.modelParts(id).parts) this.push(p.m, p.g.clone().applyMatrix4(M4)); }
+  obbModel(M4, rotY, x0, x1, z0, z1, scale) {        // препятствие по прямоугольнику в координатах модели
+    const v = new THREE.Vector3((x0 + x1) / 2, 0, (z0 + z1) / 2).applyMatrix4(M4);
+    this.obstacles.add({ x: v.x, z: v.z, h: rotY, hl: (x1 - x0) / 2 * scale, hw: (z1 - z0) / 2 * scale });
+  }
+
+  // заправка Shell по модели: козырёк к дороге, логотипы на стеле и козырьке
+  shellLogo() {
+    if (M.shellLogo) return M.shellLogo;
+    const t = canvasTex(512, 256, (g, W, H) => {
+      g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+      const cx = 128, cy = 196, R = 104;                        // ракушка: веер из рёбер
+      g.fillStyle = '#fbce07'; g.strokeStyle = '#dd1d21'; g.lineWidth = 12;
+      g.beginPath(); g.moveTo(cx - 34, cy); g.lineTo(cx - R, cy - 40); g.arc(cx, cy - 70, R, Math.PI * 1.08, Math.PI * 1.92); g.lineTo(cx + 34, cy); g.closePath(); g.fill(); g.stroke();
+      g.lineWidth = 7; for (let k = -3; k <= 3; k++) { const a = -Math.PI / 2 + k * 0.32; g.beginPath(); g.moveTo(cx, cy - 6); g.lineTo(cx + Math.cos(a) * (R - 4), cy - 70 + Math.sin(a) * (R - 4) + 4); g.stroke(); }
+      g.fillStyle = '#dd1d21'; g.font = '800 104px Arial, Helvetica, sans-serif'; g.textBaseline = 'middle'; g.fillText('Shell', 250, 140);
+    }, false);
+    return (M.shellLogo = new THREE.MeshStandardMaterial({ map: t, roughness: 0.5, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.15 }));
+  }
+  shellStation(x, z, rot, face) {
+    const S = 1.65, A = Math.atan2(-face * Math.cos(rot), face * Math.sin(rot));   // модель смотрит +x к дороге
+    const c = new THREE.Vector3(-1.43, 0, 0), M4 = this.modelMatrix('gas_shell', x, z, A, S, c);
+    this.placeModel('gas_shell', M4);
+    const logo = (w, h, px, py, pz, ry) => { const g = new THREE.PlaneGeometry(w, h); g.rotateY(ry); g.translate(px, py, pz); g.applyMatrix4(M4); this.push(this.shellLogo(), g); };
+    logo(1.5, 0.75, 3.49, 1.78, 5.47 + 0.02, 0); logo(1.5, 0.75, 3.49, 1.78, 5.01 - 0.02, Math.PI);   // стела
+    logo(1.6, 0.27, 1.15, 3.215, 6.18, 0); logo(1.6, 0.27, 1.15, 3.215, -6.18, Math.PI);              // борта козырька
+    logo(1.6, 0.27, 4.33, 3.215, 0, Math.PI / 2);
+    const ob = (x0, x1, z0, z1) => this.obbModel(M4, A, x0, x1, z0, z1, S);
+    ob(-7.5, -2.1, -6.1, 5.8);                                         // здания
+    for (const pz of [-4.5, -0.5, 3.5]) ob(-1.1, 0.1, pz - 0.9, pz + 0.9);   // колонки
+    ob(2.64, 4.34, 5.01, 5.47);                                        // стела
+    const zc = new THREE.Vector3(1.6, 0, 0).applyMatrix4(M4);
+    this.services.push({ type: 'gas', x: zc.x, z: zc.z, r: 10, nx: face * Math.sin(rot), nz: face * Math.cos(rot) });
+    this.labels.push({ x, z, text: 'Shell', small: true });
+  }
+
+  // сквер по модели парка: забор с воротами, фонтан, деревья
+  parkSquare(x, z, rot) {
+    const M4 = this.modelMatrix('park_square', x, z, rot, 1);
+    this.placeModel('park_square', M4);
+    const b = this.modelParts('park_square').box, w = b.max.x - b.min.x, d = b.max.z - b.min.z, cx = (b.min.x + b.max.x) / 2, cz = (b.min.z + b.max.z) / 2;
+    const ob = (x0, x1, z0, z1) => this.obbModel(M4, rot, x0 - cx, x1 - cx, z0 - cz, z1 - cz, 1);
+    ob(b.min.x, b.max.x, b.min.z, b.min.z + 0.8); ob(b.min.x, b.max.x, b.max.z - 0.8, b.max.z);
+    ob(b.min.x, b.min.x + 0.8, b.min.z, b.max.z); ob(b.max.x - 0.8, b.max.x, b.min.z, b.max.z);
+    this.labels.push({ x, z, text: 'Сквер', small: true });
   }
 
   // ---------- автосервис и тюнинг-ателье: можно заехать внутрь ----------
