@@ -1008,6 +1008,7 @@ export class City extends World {
       for (const k of ['position', 'normal', 'uv']) { const a = g.attributes[k]; if (!a) continue; const n = a.itemSize, arr = new Float32Array(a.count * n); for (let i = 0; i < a.count; i++) for (let c = 0; c < n; c++) arr[i * n + c] = a.getComponent(i, c); out.setAttribute(k, new THREE.BufferAttribute(arr, n)); }
       const m = o.material; m.side = THREE.FrontSide;
       for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap']) if (m[k]) m[k].anisotropy = 8;
+      if (id === 'towers_pack' && m.emissiveMap) { m.userData.nightGlow = m.emissiveIntensity || 1; m.emissiveIntensity = 0; }   // днём окна не светятся
       if (!by.has(m)) by.set(m, []);
       if (o.isInstancedMesh) {                             // одинаковые объекты сохранены как копии одного: разворачиваем все
         const im = new THREE.Matrix4();
@@ -1245,6 +1246,10 @@ export class City extends World {
   updateInstances(cx, cz) {
     if (this._ic && Math.hypot(cx - this._ic[0], cz - this._ic[1]) < 25) return;
     this._ic = [cx, cz];
+    // далёкие кварталы и деревья не рисуем (их скрывает дымка)
+    if (!this.cullList) { this.cullList = []; for (const m of this.root.children) { if (!m.isMesh || m.isInstancedMesh) continue; m.geometry.computeBoundingSphere(); const b = m.geometry.boundingSphere; if (b.radius < 700) this.cullList.push({ m, x: b.center.x, z: b.center.z, r: b.radius }); } }
+    for (const c of this.cullList) c.m.visible = Math.hypot(c.x - cx, c.z - cz) - c.r < 1150;
+    for (const t of this.treeSets || []) { const v = Math.hypot(t.x + 200 - cx, t.z + 200 - cz) < 760; for (const m of t.meshes) m.visible = v; }
     for (const S of this.instSets || []) {
       let n = 0;
       for (const it of S.list) { const dx = it.x - cx, dz = it.z - cz; if (dx * dx + dz * dz > S.R2) continue; for (const m of S.meshes) m.setMatrixAt(n, it.M4); n++; }
@@ -1256,7 +1261,8 @@ export class City extends World {
   instancedTrees() {
     const all = this.trees, buckets = new Map();
     for (const t of all) { const k = Math.floor(t.x / 400) + ':' + Math.floor(t.z / 400); if (!buckets.has(k)) buckets.set(k, []); buckets.get(k).push(t); }
-    for (const b of buckets.values()) { this.trees = b; super.instancedTrees(); }
+    this.treeSets = [];
+    for (const b of buckets.values()) { const n0 = this.root.children.length; this.trees = b; super.instancedTrees(); this.treeSets.push({ x: b[0].x, z: b[0].z, meshes: this.root.children.slice(n0) }); }
     this.trees = all;
   }
 

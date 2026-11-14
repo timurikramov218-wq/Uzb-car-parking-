@@ -7,6 +7,7 @@ import { LEVELS, LevelRunner } from './levels.js';
 import { Hangar, HANGAR } from './garage.js';
 import { TUNE, RIMS, tuneOf, tunedSpec, applyTune } from './tuning.js';
 import { Traffic } from './traffic.js';
+import { Navigator } from './nav.js';
 
 const $ = id => document.getElementById(id);
 const fmt = n => n.toLocaleString('ru-RU');
@@ -36,7 +37,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 12000);
-scene.fog = new THREE.Fog(0xdfe6ea, 400, 7600);
+scene.fog = new THREE.Fog(0xdfe6ea, 380, 1250);              // лёгкая дымка: далёкое не рисуется и не лагает
 {
   const m = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
@@ -63,7 +64,7 @@ const SUN_OFF = new THREE.Vector3(90, 160, 60);
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
-let world, levels, player, playerMesh, hangar, traffic;
+let world, levels, player, playerMesh, hangar, traffic, nav;
 let inHangar = false;
 // ангар (меню и гараж) или город (езда): показываем только одно, второе не рисуем
 function setScene(h) {
@@ -75,12 +76,14 @@ const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(
 
 // ---------- Ввод ----------
 const input = { up: false, down: false, left: false, right: false, brake: false, horn: false };
+let sirenOn = false;
 const KEYS = { KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', Space: 'brake', KeyH: 'horn' };
 addEventListener('keydown', e => {
   if (KEYS[e.code]) { input[KEYS[e.code]] = true; if (playing()) e.preventDefault(); }
   if (e.code === 'Escape') { if (playing()) openMenu(); else if (!$('levels').hidden || !$('garage').hidden) closeSheets(); }
   if (!playing()) return;
   if (e.code === 'KeyC') cycleCam();
+  if (e.code === 'KeyL') toggleSiren();
   if (e.code === 'KeyR') resetCar();
 });
 addEventListener('keyup', e => { if (KEYS[e.code]) input[KEYS[e.code]] = false; });
@@ -117,6 +120,9 @@ const audio = {
       noise.connect(bp); bp.connect(this.skidGain); this.skidGain.connect(this.master); noise.start();
       this.hornGain = ctx.createGain(); this.hornGain.gain.value = 0; this.hornGain.connect(this.master);
       for (const f of [415, 520]) { const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = f; o.connect(this.hornGain); o.start(); }
+      this.siren = ctx.createOscillator(); this.siren.type = 'sawtooth'; this.sirenGain = ctx.createGain(); this.sirenGain.gain.value = 0;
+      const sf = ctx.createBiquadFilter(); sf.type = 'lowpass'; sf.frequency.value = 2200;
+      this.siren.connect(sf); sf.connect(this.sirenGain); this.sirenGain.connect(this.master); this.siren.start();
     } catch { this.ctx = null; }
   },
   update(speed, throttle, horn, active) {
@@ -126,6 +132,9 @@ const audio = {
     this.eng.frequency.setTargetAtTime(rpm, t, 0.05); this.eng2.frequency.setTargetAtTime(rpm * 0.5, t, 0.05);
     this.engGain.gain.setTargetAtTime(active ? 0.1 + (throttle ? 0.05 : 0) : 0, t, 0.1);
     this.hornGain.gain.setTargetAtTime(horn && active ? 0.07 : 0, t, 0.02);
+    const sOn = active && sirenOn;                         // вой сирены: частота плавает 650–1350 Гц
+    this.sirenGain.gain.setTargetAtTime(sOn ? 0.05 : 0, t, 0.05);
+    if (sOn) this.siren.frequency.setTargetAtTime(1000 + 350 * Math.sin(t * Math.PI * 1.1), t, 0.03);
     this.skidGain.gain.setTargetAtTime(active && player ? Math.min(0.12, Math.max(0, (player.skid || 0) - 1.05) * 0.25) : 0, t, 0.05);
   },
   thump(v) {
@@ -155,6 +164,7 @@ function rebuildPlayer() {
   player.setSpec(tunedSpec(carById(save.car), t, save.damage));
   playerMesh = buildCarMesh(carById(save.car), colorOf(save.car), save.plate);
   applyTune(playerMesh, player.spec, t);
+  $('btn-siren').hidden = !t.siren; if (!t.siren) sirenOn = false;
   // своя копия краски у машины игрока — чтобы показывать грязь
   playerPaint = [];
   playerMesh.traverse(o => { if (o.isMesh && o.material?.clearcoat !== undefined && o.material.clearcoat > 0) { o.material = o.material.clone(); o.material.userData.base = o.material.color.clone(); playerPaint.push(o.material); } });
@@ -167,6 +177,10 @@ function applyDirt() {
   const d = save.dirt || 0;
   for (const m of playerPaint) { m.color.copy(m.userData.base).lerp(DIRT, d * 0.45); m.clearcoat = 1 - d * 0.85; m.roughness = 0.3 + d * 0.5; }
 }
+function toggleSiren() {
+  if (!tuneOf(save, save.car).siren) { toast('Поставь мигалки в тюнинге', 2000); return; }
+  sirenOn = !sirenOn; $('btn-siren').classList.toggle('on', sirenOn);
+}
 function syncMesh(mesh, v) {
   mesh.position.set(v.x, v.y || 0, v.z); mesh.rotation.order = 'YZX'; mesh.rotation.set(v.tRoll || 0, v.h, v.tPitch || 0);
   for (const w of mesh.userData.wheels) {
@@ -174,6 +188,11 @@ function syncMesh(mesh, v) {
     else { w.spin.rotation.z = v.wheelRot; if (w.front) w.pivot.rotation.y = v.steer; }
   }
   for (const m of mesh.userData.lights.brake) m.emissiveIntensity = v.braking ? 2.5 : 0.35;
+  const b2 = mesh.userData.body; if (b2) b2.position.y = (b2.userData.baseY || 0) + (v.bodyY || 0);   // подвеска
+  const lb = mesh.userData.lightbar;
+  if (lb) { const on = sirenOn && mesh === playerMesh, ph = Math.floor(t * 6) % 4, a = on && (ph === 0 || ph === 2), bb = on && (ph === 1 || ph === 3);
+    lb.userData.lamps[0].emissiveIntensity = a ? 6 : 0.2; lb.userData.lamps[1].emissiveIntensity = bb ? 6 : 0.2;
+    lb.userData.light.intensity = on ? 18 : 0; if (on) lb.userData.light.color.setHex(a ? lb.userData.cols[0] : lb.userData.cols[1]); }
   const b = mesh.userData.body;
   if (b) { b.rotation.x = v.roll || 0; b.rotation.z = v.pitch || 0; }
 }
@@ -236,6 +255,8 @@ function drawMinimap() {
   mctx.fillStyle = '#1c1d20'; mctx.fillRect(0, 0, Wd, Wd);
   mctx.translate(Wd / 2, Wd / 2); mctx.rotate(camHeading - Math.PI / 2); mctx.scale(s / MS, s / MS);
   mctx.drawImage(mapCanvas, -(player.x - MX0) * MS, -(player.z - MZ0) * MS);
+  if (nav && nav.route) { mctx.strokeStyle = '#4aa8ff'; mctx.lineWidth = 5 * MS / 1.6; mctx.lineJoin = mctx.lineCap = 'round'; mctx.beginPath();
+    const R = nav.route; for (let i = Math.max(0, nav.idx - 2); i < R.length; i++) { const X = (R[i].x - player.x) * MS, Z = (R[i].z - player.z) * MS; if (i === Math.max(0, nav.idx - 2)) mctx.moveTo(X, Z); else mctx.lineTo(X, Z); } mctx.stroke(); }
   mctx.restore();
   const a = camHeading - Math.PI / 2;
   const dot = (x, z, col, r) => {
@@ -503,6 +524,11 @@ function drawBigMap() {
     g.fillStyle = CAT_COL[p.cat]; g.fillRect(bx, by, 3, bh);
     g.fillStyle = '#f4efe6'; g.textBaseline = 'middle'; g.fillText(p.text, bx + 7, py + 0.5);
   }
+  if (nav && nav.route) {                 // маршрут
+    g.strokeStyle = '#4aa8ff'; g.lineWidth = Math.max(3, 6 * k); g.lineJoin = g.lineCap = 'round'; g.beginPath();
+    nav.route.forEach((p, i) => (i ? g.lineTo(SX(p.x), SZ(p.z)) : g.moveTo(SX(p.x), SZ(p.z)))); g.stroke();
+    const d = nav.route.at(-1); g.fillStyle = '#4aa8ff'; g.strokeStyle = '#fff'; g.lineWidth = 3; g.beginPath(); g.arc(SX(d.x), SZ(d.z), 9, 0, 7); g.fill(); g.stroke();
+  }
   // машина игрока
   if (player) {
     const px = SX(player.x), py = SZ(player.z);
@@ -535,13 +561,16 @@ const bmZoom = (f, cx, cy) => {
   if (cx !== undefined) { bmView.x += (cx - Wd / 2) * (1 / k0 - 1 / k1); bmView.z += (cy - H / 2) * (1 / k0 - 1 / k1); }
   bmView.k = k1; drawBigMap();
 };
+$('nav-x').onclick = () => { nav?.clear(); $('nav').hidden = true; };
+$('btn-siren').onclick = toggleSiren;
 $('btn-map').onclick = openBigMap; mm.onclick = openBigMap;
 $('bm-close').onclick = closeBigMap;
 $('bm-in').onclick = () => bmZoom(1.5); $('bm-out').onclick = () => bmZoom(1 / 1.5);
 bm.querySelectorAll('[data-go]').forEach(b => (b.onclick = () => bmGo(b.dataset.go)));
 bmc.addEventListener('wheel', e => { e.preventDefault(); bmZoom(e.deltaY < 0 ? 1.2 : 1 / 1.2, e.offsetX, e.offsetY); }, { passive: false });
 { const pts = new Map(); let pinch = 0;
-  bmc.addEventListener('pointerdown', e => { bmc.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.offsetX, y: e.offsetY }); });
+  let tap = null;
+  bmc.addEventListener('pointerdown', e => { bmc.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.offsetX, y: e.offsetY }); tap = pts.size === 1 ? { x: e.offsetX, y: e.offsetY } : null; });
   bmc.addEventListener('pointermove', e => {
     const p = pts.get(e.pointerId); if (!p) return;
     if (pts.size === 1) { bmView.x -= (e.offsetX - p.x) / bmView.k; bmView.z -= (e.offsetY - p.y) / bmView.k; p.x = e.offsetX; p.y = e.offsetY; drawBigMap(); return; }
@@ -549,7 +578,14 @@ bmc.addEventListener('wheel', e => { e.preventDefault(); bmZoom(e.deltaY < 0 ? 1
     const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
     if (pinch) bmZoom(d / pinch, (a.x + b.x) / 2, (a.y + b.y) / 2); pinch = d;
   });
-  const up = e => { pts.delete(e.pointerId); pinch = 0; };
+  const up = e => {
+    if (tap && Math.hypot(e.offsetX - tap.x, e.offsetY - tap.y) < 7 && nav) {          // нажатие без сдвига — точка назначения
+      const k = bmView.k, x = bmView.x + (e.offsetX - bmc.clientWidth / 2) / k, z = bmView.z + (e.offsetY - bmc.clientHeight / 2) / k;
+      if (nav.setDest(x, z, player)) { toast(`Маршрут: ${Math.round(nav.route.at(-1).d)} м`); $('nav').hidden = false; } else toast('Туда не проехать', 1800, true);
+      drawBigMap();
+    }
+    tap = null; pts.delete(e.pointerId); pinch = 0;
+  };
   bmc.addEventListener('pointerup', up); bmc.addEventListener('pointercancel', up);
 }
 addEventListener('resize', () => bmOpen && drawBigMap());
@@ -597,12 +633,16 @@ function frame() {
       const vyS = Math.max(-25, Math.min(25, (yN - Y) / Math.max(dt, 1e-3)));
       vy += (vyS - vy) * Math.min(1, dt * 12); player.y = yN; player.air = false;
     }
+    // подвеска: кузов проседает при приземлении/ударе и раскачивается
+    const ayv = (vy - (player._pvy || 0)) / Math.max(dt, 1e-3); player._pvy = vy;
+    player.bodyV = (player.bodyV || 0) + (-90 * (player.bodyY || 0) - 9 * (player.bodyV || 0) - Math.max(-60, Math.min(60, ayv)) * 0.35) * dt;
+    player.bodyY = Math.max(-0.12, Math.min(0.1, (player.bodyY || 0) + player.bodyV * dt));
     player.vy = vy;
     const yL = hAt(player.x + hz * hw, player.z - hx * hw), yR = hAt(player.x - hz * hw, player.z + hx * hw);
     const k = 1 - Math.exp(-dt * 10);
     player.tPitch = (player.tPitch || 0) + (Math.atan2(yF - yB, player.spec.len) - (player.tPitch || 0)) * k;
     player.tRoll = (player.tRoll || 0) + (Math.atan2(yL - yR, player.spec.wid) - (player.tRoll || 0)) * k;
-    if (hit > 1.2) audio.thump(hit);
+    if (hit > 1.2) { audio.thump(hit); player.bodyV = (player.bodyV || 0) - Math.min(1.5, hit * 0.12); player.roll += (Math.random() - 0.5) * Math.min(0.12, hit * 0.01); }
     if (mode === 'level') {
       const r = levels.update(dt, player, hit, t);
       const tl = Math.max(0, Math.ceil(levels.timeLeft));
@@ -620,6 +660,17 @@ function frame() {
     drawMinimap();
     trafficCheck(dt);
     if (mode === 'free') serviceCheck(dt); else $('svc-btn').hidden = true;
+    if (nav && nav.route && mode === 'free') {
+      const r = nav.update(player);
+      if (r.arrived) { nav.clear(); $('nav').hidden = true; toast('Вы приехали'); audio.ding(); }
+      else {
+        if (r.off > 35 && t - (nav._re || 0) > 1.5) { nav._re = t; nav.plan(player); }
+        const ang = Math.atan2(-(r.ahead.z - player.z), r.ahead.x - player.x) - player.h;
+        $('nav-arrow').style.transform = `rotate(${-ang}rad)`;
+        $('nav-dist').textContent = r.left > 950 ? (r.left / 1000).toFixed(1) + ' км' : Math.round(r.left / 10) * 10 + ' м';
+      }
+    }
+    $('nav').hidden = !(nav && nav.route && mode === 'free');
   } else if (hangar && inHangar) {
     if (t - dragT > 2.5) orbit += dt;           // сам крутится, пока не трогают
     hangar.update(dt);
@@ -654,6 +705,7 @@ function frame() {
   await world.buildAsync(p => { $('title-bar').style.width = $('load-bar').style.width = Math.round(p * 100) + '%'; });
   player.reset(world.spawn.x, world.spawn.z, world.spawn.h); camHeading = player.h;
   traffic = new Traffic(scene, world); traffic.setVisible(!inHangar); window.__game.traffic = traffic;
+  nav = new Navigator(scene, world); window.__game.nav = nav;
   drawMapBase();
   cityReady = true; $('title-progress').classList.add('done');
   if (mode === 'garage') renderGarage();

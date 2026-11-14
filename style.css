@@ -257,3 +257,14 @@ h2 { font: 300 26px/1.1 var(--font); letter-spacing: 0.02em; margin: 0; }
   .pedal { width: 78px; height: 104px; }
   .pedal.gas { width: 86px; height: 132px; }
 }
+.siren-btn { left: auto; right: max(14px, env(safe-area-inset-right)); top: max(106px, calc(env(safe-area-inset-top) + 106px)); }
+.siren-btn svg { fill: none; stroke: currentColor; width: 18px; height: 18px; }
+.siren-btn.on { background: #c8202d; border-color: #c8202d; }
+@media (pointer: coarse) { .siren-btn { top: max(98px, calc(env(safe-area-inset-top) + 98px)); } .hud-speed { top: max(150px, calc(env(safe-area-inset-top) + 150px)); } .hud-gauges { top: max(222px, calc(env(safe-area-inset-top) + 222px)); } }
+.nav-pill { left: 50%; top: max(14px, env(safe-area-inset-top)); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; background: var(--panel-solid); border: 1px solid var(--line-2); border-radius: 999px; padding: 6px 8px 6px 14px; pointer-events: auto; }
+.nav-pill svg { width: 22px; height: 22px; color: #4aa8ff; transition: transform .15s; }
+.nav-pill b { font: 600 15px var(--font); font-variant-numeric: tabular-nums; min-width: 5ch; }
+.nav-pill button { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); }
+.nav-pill button svg { width: 14px; height: 14px; color: var(--muted); }
+.bm-hint { font: 500 11px var(--font); letter-spacing: 0.08em; color: var(--muted); margin-right: auto; }
+@media (max-width: 720px) { .bm-hint { display: none; } }

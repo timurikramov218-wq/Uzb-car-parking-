@@ -5,11 +5,12 @@ export const TUNE = [
   { key: 'engine', name: 'Двигатель', opts: [[0, 'Сток', 0], [1, 'Stage 1', 400], [2, 'Stage 2', 900], [3, 'Stage 3', 1800]] },
   { key: 'susp', name: 'Подвеска', opts: [[0, 'Стандарт', 0], [-1, 'Занижение', 300], [1, 'Лифт', 300]] },
   { key: 'tint', name: 'Тонировка', opts: [[0, 'Нет', 0], [1, 'Тёмная', 200]] },
+  { key: 'siren', name: 'Мигалки и сирена', opts: [[0, 'Нет', 0], [1, 'Красно-синие', 600], [2, 'Оранжевые', 400]] },
   { key: 'glow', name: 'Подсветка днища', opts: [['', 'Нет', 0], ['#3d7bff', 'Синяя', 250], ['#ff2d55', 'Красная', 250], ['#22e07a', 'Зелёная', 250], ['#b04bff', 'Фиолетовая', 250]] },
 ];
 export const RIMS = [null, '#15161a', '#c9ccd1', '#d4a62a', '#e23b3b', '#2f6bff', '#f2f2f0'];
 
-export const tuneOf = (save, id) => Object.assign({ engine: 0, susp: 0, tint: 0, glow: '', rims: null }, save.tune?.[id]);
+export const tuneOf = (save, id) => Object.assign({ engine: 0, susp: 0, tint: 0, glow: '', rims: null, siren: 0 }, save.tune?.[id]);
 
 // характеристики с учётом мотора и износа
 export function tunedSpec(spec, t, damage = 0) {
@@ -28,7 +29,7 @@ function glowTexture() {
 
 // внешний тюнинг на готовой модели машины
 export function applyTune(mesh, spec, t) {
-  const body = mesh.userData.body; if (body) body.position.y = t.susp * 0.05;
+  const body = mesh.userData.body; if (body) { body.position.y = t.susp * 0.05; body.userData.baseY = body.position.y; }
   // тонировка: прозрачные материалы стёкол темнее
   mesh.traverse(o => {
     if (!o.isMesh) return;
@@ -59,5 +60,18 @@ export function applyTune(mesh, spec, t) {
     const m = new THREE.MeshBasicMaterial({ map: glowTexture(), color: t.glow, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
     const p = new THREE.Mesh(new THREE.PlaneGeometry(spec.len * 1.6, spec.wid * 2.4).rotateX(-Math.PI / 2), m);
     p.position.y = 0.04; p.renderOrder = 2; mesh.add(p); mesh.userData.glow = p;
+  }
+  // мигалки на крыше
+  if (mesh.userData.lightbar) { (mesh.userData.body || mesh).remove(mesh.userData.lightbar); mesh.userData.lightbar = null; }
+  if (t.siren) {
+    const box = new THREE.Box3().setFromObject(mesh), top = box.max.y - mesh.position.y, L = Math.min(1.2, spec.wid * 0.75);
+    const bar = new THREE.Group(), base = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.06, L), new THREE.MeshStandardMaterial({ color: 0x15161a, metalness: 0.6, roughness: 0.4 }));
+    base.position.y = 0.03; bar.add(base);
+    const cols = t.siren === 1 ? [0xff1a2a, 0x1f5bff] : [0xff9a00, 0xff9a00], lamps = [];
+    cols.forEach((c, i) => { const m = new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.2, transparent: true, opacity: 0.9, roughness: 0.2 });
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.11, L * 0.46), m); lamp.position.set(0, 0.115, (i ? 1 : -1) * L * 0.25); bar.add(lamp); lamps.push(m); });
+    const light = new THREE.PointLight(cols[0], 0, 14, 2); light.position.y = 0.5; bar.add(light);
+    bar.position.set(-spec.len * 0.04, top, 0); bar.userData = { lamps, cols, light };
+    mesh.add(bar); mesh.userData.lightbar = bar;
   }
 }

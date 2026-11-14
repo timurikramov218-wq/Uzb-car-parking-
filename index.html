@@ -25,11 +25,13 @@
   </div>
   <div class="hud-signal" id="signal" hidden><i class="r"></i><i class="y"></i><i class="g"></i><span id="signal-t"></span></div>
   <canvas id="minimap" width="280" height="280" title="Открыть карту (M)"></canvas>
+  <button class="hud-btn siren-btn" id="btn-siren" aria-label="Сирена" hidden><svg viewBox="0 0 24 24"><path d="M7 18v-6a5 5 0 0 1 10 0v6M5 21h14v-3H5zM12 3v2M4.5 6.5 6 8M19.5 6.5 18 8"/></svg></button>
   <button class="hud-btn map-btn" id="btn-map" aria-label="Карта"><svg viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 4v14M15 6v14" stroke="currentColor" stroke-width="2"/></svg></button>
   <div class="hud-speed"><b id="speed">0</b><span>км/ч</span><i id="gear">N</i><div class="speed-bar"><em id="speed-bar"></em></div></div>
   <div class="hud-gauges"><div class="gauge" title="Бензин"><svg viewBox="0 0 24 24"><path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h12M14 9h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V8l-3-3"/><path d="M7 8h4"/></svg><div class="gbar"><em id="fuel-bar"></em></div></div>
     <div class="gauge" title="Состояние"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8V21h3.2l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><div class="gbar"><em id="hp-bar"></em></div></div></div>
   <button class="svc-btn" id="svc-btn" hidden></button>
+  <div class="nav-pill" id="nav" hidden><svg viewBox="0 0 24 24" id="nav-arrow"><path d="M12 3l6 16-6-4-6 4z" fill="currentColor" stroke="none"/></svg><b id="nav-dist"></b><button id="nav-x" aria-label="Сбросить маршрут"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
   <div id="toast" class="toast"></div>
 </div>
 
@@ -53,7 +55,7 @@
 <section id="bigmap" class="bigmap" hidden>
   <canvas id="bigmap-c"></canvas>
   <header class="bm-head"><h2>Карта</h2>
-    <div class="bm-tabs"><button data-go="city" class="on">Весь город</button><button data-go="me">Где я</button></div>
+    <div class="bm-tabs"><button data-go="city" class="on">Весь город</button><button data-go="me">Где я</button></div><span class="bm-hint">Нажми на карту — проложу маршрут</span>
     <button class="close" id="bm-close" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
   <div class="bm-zoom"><button id="bm-in" aria-label="Приблизить">+</button><button id="bm-out" aria-label="Отдалить">−</button></div>
   <div class="bm-legend"><span><i class="l-mount"></i>Районы</span><span><i class="l-sight"></i>Мосты и башня</span><span><i class="l-park"></i>Парки</span><span><i class="l-city"></i>Места</span></div>
