@@ -70,7 +70,9 @@ export function applyTune(mesh, spec, t) {
     const cols = t.siren === 1 ? [0xff1a2a, 0x1f5bff] : [0xff9a00, 0xff9a00], lamps = [];
     cols.forEach((c, i) => { const m = new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.2, transparent: true, opacity: 0.9, roughness: 0.2 });
       const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.11, L * 0.46), m); lamp.position.set(0, 0.115, (i ? 1 : -1) * L * 0.25); bar.add(lamp); lamps.push(m); });
-    const light = new THREE.PointLight(cols[0], 0, 14, 2); light.position.y = 0.5; bar.add(light);
+    // вместо настоящего источника света (он заставил бы пересобрать все шейдеры) — светящийся ореол
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(4, 4).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: cols[0], transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, map: glowTexture() }));
+    halo.position.y = -top + 0.06; bar.add(halo); const light = { halo, color: halo.material.color, set intensity(v) { halo.material.opacity = v ? 0.55 : 0; } };
     bar.position.set(-spec.len * 0.04, top, 0); bar.userData = { lamps, cols, light };
     mesh.add(bar); mesh.userData.lightbar = bar;
   }
