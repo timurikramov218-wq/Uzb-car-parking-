@@ -47,7 +47,7 @@ export class Hangar {
     });
     const wallM = std({ map: wallTex, roughness: 0.6, metalness: 0.2, side: THREE.DoubleSide });
     const led = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xdfeaff, emissiveIntensity: 2.2 });
-    const blueLed = new THREE.MeshStandardMaterial({ color: 0x3b82ff, emissive: 0x2f6bff, emissiveIntensity: 2.4 });
+    const blueLed = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xf4ede2, emissiveIntensity: 1.3 });   // нейтральный тёплый белый
     for (const sd of [-1, 1]) {
       const g = new THREE.PlaneGeometry(ST_L, ST_H); g.translate(0, ST_H / 2, 0); g.rotateY(sd > 0 ? Math.PI : 0); g.translate(0, 0, sd * ST_W / 2);
       const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * ST_L / 6, uv.getY(i) * ST_H / 6); this.add(wallM, g);
@@ -80,7 +80,7 @@ export class Hangar {
     const lines = new THREE.Mesh(new THREE.RingGeometry(1.2, 3.4, 72, 1).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: stex(512, 64, (g, w, h) => { g.fillStyle = '#0d0e11'; g.fillRect(0, 0, w, h); g.fillStyle = 'rgba(255,255,255,0.06)'; for (let x = 0; x < w; x += 16) g.fillRect(x, 0, 2, h); }), metalness: 0.7, roughness: 0.3 }));
     lines.position.y = 0.245; this.turn.add(lines);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(3.7, 0.045, 8, 128).rotateX(Math.PI / 2), blueLed); ring.position.y = 0.2; this.root.add(ring);
-    const glow = new THREE.Mesh(new THREE.RingGeometry(3.75, 4.6, 96).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x2f6bff, transparent: true, opacity: 0.16, depthWrite: false }));
+    const glow = new THREE.Mesh(new THREE.RingGeometry(3.75, 4.6, 96).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.05, depthWrite: false }));
     glow.position.y = 0.01; this.root.add(glow);
     // витрины: остальные машины на низких платформах вдоль стен
     const podium = std({ color: 0x17181c, metalness: 0.5, roughness: 0.3 });
@@ -97,8 +97,8 @@ export class Hangar {
     // задняя стена: светящаяся вывеска
     const sign = stex(1024, 192, (g, w, h) => {
       g.clearRect(0, 0, w, h); g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.font = "800 92px 'Montserrat', 'Arial Black', Arial"; g.fillStyle = '#ffffff'; g.fillText('UZB CAR PARKING', w / 2, h / 2 - 6, w - 40);
-      g.fillStyle = '#3b82ff'; g.fillRect(w / 2 - 120, h - 22, 240, 8);
+      g.font = "300 84px 'Manrope', 'Helvetica Neue', Arial"; g.letterSpacing = '24px'; g.fillStyle = '#ffffff'; g.fillText('UZB CAR PARKING', w / 2, h / 2 - 6, w - 40);
+      g.fillStyle = 'rgba(255,255,255,0.5)'; g.fillRect(w / 2 - 60, h - 20, 120, 3);
     }, false);
     const sg = new THREE.PlaneGeometry(12, 2.25); sg.rotateY(Math.PI / 2); sg.translate(-ST_L / 2 + 0.06, 4.4, 0);
     this.add(new THREE.MeshStandardMaterial({ map: sign, transparent: true, emissive: 0xffffff, emissiveMap: sign, emissiveIntensity: 1.2 }), sg);
@@ -133,11 +133,9 @@ export class Hangar {
       cam.position.set(ox + Math.cos(a) * R, 2.1, oz + Math.sin(a) * R);
       cam.lookAt(ox, wide ? 0.55 : 0.2, oz);
     } else {
-      const a = t * 0.16, R = wide ? 8.4 : 11;
-      cam.position.set(ox + Math.cos(a) * R, 2.6, oz + Math.sin(a) * R);
-      // машина слева от панели гаража: смещаем точку взгляда вправо от камеры
-      const rx = -Math.sin(a), rz = Math.cos(a), sh = wide ? -2.1 : 0;
-      cam.lookAt(ox + rx * sh, wide ? 0.7 : -0.6, oz + rz * sh);
+      const a = t * 0.16, R = wide ? 8.2 : 10.5;
+      cam.position.set(ox + Math.cos(a) * R, 1.9, oz + Math.sin(a) * R);
+      cam.lookAt(ox, wide ? 0.55 : 0.1, oz);
     }
   }
 }

@@ -335,18 +335,13 @@ function previewGarage() {        // машина на поворотном по
 }
 const priceTag = n => (n ? `${fmt(n)} сум` : 'бесплатно');
 function renderGarage() {
-  document.querySelectorAll('.gtabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === gTab));
-  for (const k of ['cars', 'paint', 'tune']) $('tab-' + k).hidden = k !== gTab;
-  const tabs = $('car-tabs'); tabs.innerHTML = '';
-  for (const c of CARS) {
-    const b = document.createElement('button'); b.className = c.id === save.car ? 'on' : '';
-    b.innerHTML = `<span>${c.name}</span><small>${c.id === save.car ? 'за рулём' : 'бесплатно'}</small>`;
-    b.onclick = () => { if (c.id === save.car) return; save.car = c.id; persist(); rebuildPlayer(); previewGarage(); renderGarage(); };
-    tabs.append(b);
-  }
+  document.querySelectorAll('.side-icons [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === gTab));
+  for (const k of ['paint', 'tune']) $('tab-' + k).hidden = k !== gTab;
+  $('gpanel').hidden = gTab === 'cars';
   const c = carById(save.car), t = tuneOf(save, c.id), sp = tunedSpec(c, t);
   $('car-desc').textContent = c.desc;
-  $('car-specs').innerHTML = `<div><b>${Math.round(sp.maxSpeed * 3.6)}</b><span>км/ч</span></div><div><b>${c.len.toFixed(1)}</b><span>длина, м</span></div><div><b>${Math.round(sp.accel * 10) / 10}</b><span>разгон, м/с²</span></div>`;
+  const bar = (v, max) => `<i><em style="width:${Math.min(100, v / max * 100)}%"></em></i>`;
+  $('car-specs').innerHTML = `<div><span>Скорость</span>${bar(sp.maxSpeed, 80)}<b>${Math.round(sp.maxSpeed * 3.6)} км/ч</b></div><div><span>Разгон</span>${bar(sp.accel, 20)}<b>${Math.round(sp.accel * 10) / 10}</b></div><div><span>Длина</span>${bar(c.len, 5.5)}<b>${c.len.toFixed(1)} м</b></div>`;
   const sw = (el, list, cur, set, title) => {
     el.innerHTML = '';
     for (const hex of list) {
@@ -379,7 +374,9 @@ function renderGarage() {
   $('play-sub').textContent = inRun ? 'Продолжить' : cityReady ? 'Открытый город' : 'Город строится…';
   updateMoney();
 }
-document.querySelectorAll('.gtabs button').forEach(b => (b.onclick = () => { gTab = b.dataset.tab; renderGarage(); }));
+document.querySelectorAll('.side-icons [data-tab]').forEach(b => (b.onclick = () => { gTab = gTab === b.dataset.tab && gTab !== 'cars' ? 'cars' : b.dataset.tab; renderGarage(); }));
+const switchCar = d => { const i = CARS.findIndex(c => c.id === save.car); save.car = CARS[(i + d + CARS.length) % CARS.length].id; persist(); rebuildPlayer(); previewGarage(); renderGarage(); };
+$('car-prev').onclick = () => switchCar(-1); $('car-next').onclick = () => switchCar(1);
 
 // ---------- Бензин, износ и сервисы в городе ----------
 let svc = null;
