@@ -339,7 +339,11 @@ export class City extends World {
   buildTerrain() {
     const N = GN2, H = this.gH = new Float32Array(N * N);
     const tHash = new SegHash(40); tHash.addPoly(this.tunnel.P, {});
-    const tw = this.tunnel.hw + this.tunnel.sw + 2;
+    const tw = this.tunnel.hw + this.tunnel.sw + 2, TP = this.tunnel.P;
+    let t0 = Infinity, t1 = -Infinity;
+    for (let s = 0; s < TP.len; s += 2) { const p = cAt(TP, s); if (rawHeight(p.x, p.z, 999) >= 9.5) { t0 = Math.min(t0, s); t1 = Math.max(t1, s); } }
+    this.tunnel.t0 = t0; this.tunnel.t1 = t1;
+    const PORT = 16;                                   // у порталов склон над дорогой вырезаем — там бетонный короб
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
       const x = G0 + i * GSTEP, z = G0 + j * GSTEP;
       let h = rawHeight(x, z, this.riverHash.dist(x, z, 90).d);
@@ -357,10 +361,15 @@ export class City extends World {
       col.set([c.r, c.g, c.b], k * 3);
     }
     const idx = new Uint32Array((N - 1) * (N - 1) * 6); let q = 0;
-    for (let j = 0; j < N - 1; j++) for (let i = 0; i < N - 1; i++) { const a = j * N + i, b = a + 1, d = a + N, e = d + 1; idx.set([a, d, b, b, d, e], q); q += 6; }
+    for (let j = 0; j < N - 1; j++) for (let i = 0; i < N - 1; i++) {
+      const a = j * N + i, b = a + 1, d = a + N, e = d + 1, cx = G0 + (i + 0.5) * GSTEP, cz = G0 + (j + 0.5) * GSTEP;
+      const tq = tHash.dist(cx, cz, 30);
+      if (tq.seg && tq.d < tw - 1) { const sAl = tq.seg.data.s0 + (tq.seg.data.s1 - tq.seg.data.s0) * tq.t; if ((sAl > t0 - 4 && sAl < t0 + PORT) || (sAl > t1 - PORT && sAl < t1 + 4)) continue; }
+      idx[q++] = a; idx[q++] = d; idx[q++] = b; idx[q++] = b; idx[q++] = d; idx[q++] = e;
+    }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
+    g.setIndex(new THREE.BufferAttribute(idx.subarray(0, q), 1)); g.computeVertexNormals();
     const ground = new THREE.Mesh(g, M.ground); ground.receiveShadow = true; this.root.add(ground);
     const far = new THREE.Mesh(new THREE.RingGeometry(1700, 16000, 64, 1).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x8f9a76, roughness: 1 }));
     far.position.y = 40; this.root.add(far);
@@ -505,8 +514,7 @@ export class City extends World {
 
   buildTunnel(e, hwT) {
     const P = e.P, wl = hwT + 0.3;
-    let t0 = Infinity, t1 = -Infinity;
-    for (let s = 0; s < P.len; s += 2) { const p = cAt(P, s); if (rawHeight(p.x, p.z, 999) >= 9.5) { t0 = Math.min(t0, s); t1 = Math.max(t1, s); } }
+    const t0 = e.t0, t1 = e.t1;
     if (!isFinite(t0)) return;
     const CEIL = 6.6;
     for (const sd of [-1, 1]) {
@@ -515,17 +523,22 @@ export class City extends World {
       this.obsAlong(P, t0, t1, sd * (wl + 0.2), 0.3, () => -3, () => CEIL);
       // подпорные стенки выемки снаружи порталов
       for (const [a, b] of [[Math.max(0, t0 - 90), t0], [t1, Math.min(P.len, t1 + 90)]]) {
-        const top = s => { const p = cAt(P, s), l = sd * (wl + 2); return Math.max(0.3, Math.min(10, rawHeight(p.x - p.tz * l, p.z + p.tx * l, 999))); };
+        const top = s => { const p = cAt(P, s), l = sd * (wl + 2); return Math.max(0.3, Math.min(17, rawHeight(p.x - p.tz * l, p.z + p.tx * l, 999))); };
         this.wallStrip(M.wallD, P, a, b, sd * wl, () => -0.2, top);
         this.obsAlong(P, a, b, sd * (wl + 0.2), 0.3, () => -3, s => top(s) + 0.5);
       }
     }
     this.ribbon(M.wallD, P, t0, t1, -wl, wl, () => CEIL, { down: true, uS: 0.25, vS: 0.25 });
-    for (const t of [t0, t1]) {          // порталы: опоры и перемычка
+    for (const [a, b] of [[t0 - 4, t0 + 16], [t1 - 16, t1 + 4]]) {   // бетонный короб у порталов: закрывает вырез в склоне
+      const p = cAt(P, (a + b) / 2), r = this.roadRot(p), L = b - a, top = 17;
+      const g = new THREE.BoxGeometry(L, top - CEIL, (wl + 2.8) * 2); g.translate(0, CEIL + (top - CEIL) / 2, 0); g.rotateY(r); g.translate(p.x, 0, p.z); this.push(M.bridgeC, g);
+      for (const sd of [-1, 1]) { const l = sd * (wl + 1.6), w2 = new THREE.BoxGeometry(L, CEIL, 2.4); w2.translate(0, CEIL / 2, 0); w2.rotateY(r); w2.translate(p.x - p.tz * l, 0, p.z + p.tx * l); this.push(M.bridgeC, w2); }
+    }
+    for (const t of [t0 - 4, t1 + 4]) {          // порталы: опоры и перемычка
       const p = cAt(P, t), r = this.roadRot(p);
-      for (const sd of [-1, 1]) { const l = sd * (wl + 1.6), g = new THREE.BoxGeometry(2.4, 14, 3.2); g.translate(0, 7, 0); g.rotateY(r); g.translate(p.x - p.tz * l, 0, p.z + p.tx * l); this.push(M.bridgeC, g); }
-      const g = new THREE.BoxGeometry(2.4, 14 - CEIL, (wl + 2.8) * 2); g.translate(0, CEIL + (14 - CEIL) / 2, 0); g.rotateY(r); g.translate(p.x, 0, p.z); this.push(M.bridgeC, g);
-      const sg = new THREE.BoxGeometry(0.3, 1.6, 9); sg.translate(-1.35 * (t === t0 ? 1 : -1), CEIL + 2.4, 0); sg.rotateY(r); sg.translate(p.x, 0, p.z); this.push(M.green, sg);
+      for (const sd of [-1, 1]) { const l = sd * (wl + 1.6), g = new THREE.BoxGeometry(2.4, 17, 3.2); g.translate(0, 8.5, 0); g.rotateY(r); g.translate(p.x - p.tz * l, 0, p.z + p.tx * l); this.push(M.bridgeC, g); }
+      const g = new THREE.BoxGeometry(2.4, 17.4 - CEIL, (wl + 2.8) * 2); g.translate(0, CEIL + (17.4 - CEIL) / 2, 0); g.rotateY(r); g.translate(p.x, 0, p.z); this.push(M.bridgeC, g);
+      const sg = new THREE.BoxGeometry(0.3, 1.6, 9); sg.translate(-1.35 * (t < t1 ? 1 : -1), CEIL + 2.4, 0); sg.rotateY(r); sg.translate(p.x, 0, p.z); this.push(M.green, sg);
     }
     const p = cAt(P, (t0 + t1) / 2); this.labels.push({ x: p.x, z: p.z, text: 'Тоннель' });
   }

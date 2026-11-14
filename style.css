@@ -158,10 +158,10 @@ h2 { font: 800 24px/1.1 var(--font-display); margin: 0; letter-spacing: -0.01em;
 .map-btn { left: auto; right: max(14px, env(safe-area-inset-right)); top: max(64px, calc(env(safe-area-inset-top) + 64px)); }
 .map-btn svg { fill: none; stroke: currentColor; width: 20px; height: 20px; }
 .hud-speed { right: max(18px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); width: 132px; height: 132px; border-radius: 50%; background: var(--glass); box-shadow: var(--shadow);
-  display: grid; place-content: center; justify-items: center; position: absolute; }
+  display: grid; place-content: center; justify-items: center; position: absolute; padding-top: 22px; }
 .hud-speed b { font: 900 40px/1 var(--font-display); font-variant-numeric: tabular-nums; }
 .hud-speed span { font: 600 11px var(--font-body); color: var(--ink-3); letter-spacing: 0.08em; }
-.hud-speed i { position: absolute; top: 14px; font: 800 13px/1 var(--font-display); font-style: normal; color: #fff; background: var(--ink); width: 24px; height: 24px; border-radius: 8px; display: grid; place-items: center; }
+.hud-speed i { position: absolute; top: 12px; font: 800 13px/1 var(--font-display); font-style: normal; color: #fff; background: var(--ink); width: 24px; height: 24px; border-radius: 8px; display: grid; place-items: center; }
 .speed-bar { position: absolute; left: 22px; right: 22px; bottom: 20px; height: 5px; border-radius: 99px; background: var(--fill); overflow: hidden; }
 .speed-bar em { display: block; height: 100%; width: 0; border-radius: 99px; background: linear-gradient(90deg, #6ea0ff, var(--accent)); transition: width .1s linear; }
 .toast { left: 50%; top: max(80px, calc(env(safe-area-inset-top) + 80px)); transform: translate(-50%, -10px); background: #15181e; color: #fff; padding: 10px 18px; border-radius: 999px; font: 600 14px var(--font-body);
@@ -213,6 +213,9 @@ h2 { font: 800 24px/1.1 var(--font-display); margin: 0; letter-spacing: -0.01em;
   #minimap { width: 96px; height: 96px; top: max(70px, calc(env(safe-area-inset-top) + 70px)); bottom: auto; }
   .hud-speed { width: 104px; height: 104px; bottom: auto; top: max(64px, calc(env(safe-area-inset-top) + 64px)); right: max(70px, calc(env(safe-area-inset-right) + 70px)); }
   .hud-speed b { font-size: 30px; }
+  .hud-speed i { top: 9px; width: 20px; height: 20px; font-size: 11px; }
+  .hud-speed { padding-top: 16px; }
+  .hud-signal { top: max(14px, env(safe-area-inset-top)); left: max(70px, calc(env(safe-area-inset-left) + 70px)); }
   .hud-level { min-width: 0; top: max(66px, calc(env(safe-area-inset-top) + 66px)); }
   .bm-head h2 { display: none; }
   .bm-legend { font-size: 11px; }
