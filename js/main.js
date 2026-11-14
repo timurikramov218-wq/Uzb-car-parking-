@@ -37,7 +37,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 12000);
-scene.fog = new THREE.Fog(0xdfe6ea, 380, 1250);              // лёгкая дымка: далёкое не рисуется и не лагает
+scene.fog = new THREE.Fog(0xdfe6ea, 300, 950);              // лёгкая дымка: далёкое не рисуется и не лагает
 {
   const m = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,

@@ -1235,7 +1235,7 @@ export class City extends World {
   buildInstances() {
     this.instSets = [];
     for (const [o, list] of this.inst || []) {
-      const H = o.box.max.y - o.box.min.y, R = Math.min(1100, 420 + H * list[0].M4.elements[5] * 6);   // высокие видно издалека
+      const H = o.box.max.y - o.box.min.y, R = Math.min(900, 380 + H * list[0].M4.elements[5] * 5);   // высокие видно издалека
       const meshes = o.parts.map(p => {
         if (!p.g.attributes.normal) p.g.computeVertexNormals();
         const m = new THREE.InstancedMesh(p.g, p.m, list.length); m.frustumCulled = false; m.castShadow = true; m.receiveShadow = true; m.count = 0; this.root.add(m); return m;
@@ -1248,8 +1248,8 @@ export class City extends World {
     this._ic = [cx, cz];
     // далёкие кварталы и деревья не рисуем (их скрывает дымка)
     if (!this.cullList) { this.cullList = []; for (const m of this.root.children) { if (!m.isMesh || m.isInstancedMesh) continue; m.geometry.computeBoundingSphere(); const b = m.geometry.boundingSphere; if (b.radius < 700) this.cullList.push({ m, x: b.center.x, z: b.center.z, r: b.radius }); } }
-    for (const c of this.cullList) c.m.visible = Math.hypot(c.x - cx, c.z - cz) - c.r < 1150;
-    for (const t of this.treeSets || []) { const v = Math.hypot(t.x + 200 - cx, t.z + 200 - cz) < 760; for (const m of t.meshes) m.visible = v; }
+    for (const c of this.cullList) c.m.visible = Math.hypot(c.x - cx, c.z - cz) - c.r < 850;
+    for (const t of this.treeSets || []) { const v = Math.hypot(t.x + 200 - cx, t.z + 200 - cz) < 620; for (const m of t.meshes) m.visible = v; }
     for (const S of this.instSets || []) {
       let n = 0;
       for (const it of S.list) { const dx = it.x - cx, dz = it.z - cz; if (dx * dx + dz * dz > S.R2) continue; for (const m of S.meshes) m.setMatrixAt(n, it.M4); n++; }
