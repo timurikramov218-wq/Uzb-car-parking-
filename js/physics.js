@@ -167,7 +167,7 @@ export class Vehicle {
     };
     for (let iter = 0; iter < 3; iter++) {
       let any = false;
-      for (const o of obstacles.query(this.x, this.z, this.hl + 2)) { if ((o.layer || 0) !== (this.layer || 0)) continue; const m = satOBB(this, o); if (m) { any = true; respond(m, false); } }
+      for (const o of obstacles.query(this.x, this.z, this.hl + 2)) { if ((o.layer || 0) !== (this.layer || 0)) continue; if (o.y0 !== undefined && ((this.y || 0) + 1.4 < o.y0 || (this.y || 0) + 0.25 > o.y1)) continue; const m = satOBB(this, o); if (m) { any = true; respond(m, false); } }
       if (this.extra) for (const o of this.extra) { const m = satOBB(this, o); if (m) { any = true; respond(m, true); } }
       if (!any) break;
     }

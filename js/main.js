@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { CARS, COLORS, CREDITS, carById, buildCarMesh, randomPlate, loadCarModels } from './cars.js';
 import { Vehicle } from './physics.js';
-import { World, STRUCTS, S_FLAT, S_RAMP, S_BAND, structProfile, structUV, HALF, VLINES, HLINES, W, SW, RING_IN, RING_OUT, CANAL_X, CANAL_W, SPAWN, LEVEL_CENTER } from './world.js';
+import { LEVEL_CENTER } from './world.js';
+import { City, CITY_HALF } from './city.js';
 import { LEVELS, LevelRunner } from './levels.js';
-import { Terrain } from './terrain.js';
 import { Hangar, HANGAR } from './garage.js';
 
 const $ = id => document.getElementById(id);
@@ -51,12 +51,12 @@ const SUN_OFF = new THREE.Vector3(90, 160, 60);
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
-let world, levels, player, playerMesh, terrain, hangar;
+let world, levels, player, playerMesh, hangar;
 let inHangar = false;
 // ангар (меню и гараж) или город (езда): показываем только одно, второе не рисуем
 function setScene(h) {
   inHangar = h;
-  hangar.show(h); world.root.visible = !h; terrain.root.visible = !h; if (levels.group) levels.group.visible = !h; if (playerMesh) playerMesh.visible = !h;
+  hangar.show(h); world.root.visible = !h; if (levels.group) levels.group.visible = !h; if (playerMesh) playerMesh.visible = !h;
   if (h) hangar.setCar(buildCarMesh(carById(garageSel || save.car), garageColor || colorOf(garageSel || save.car), save.plate));
 }
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -173,7 +173,7 @@ function updateCamera(dt, snap = false) {
     camLook.set(player.x + hx * 20, s.hgt * 0.7 + py + Math.tan(player.tPitch || 0) * 20, player.z + hz * 20);
   } else {
     if (c.top) want.set(player.x - fx * 0.01, 34 + py, player.z - fz * 0.01);
-    else { const gy = terrain ? Math.max(hAt(player.x - fx * c.dist, player.z - fz * c.dist, player.layer || 0) + 1.5, py + c.h) : c.h; want.set(player.x - fx * c.dist, gy, player.z - fz * c.dist); look.y = 1 + py; }
+    else { const gy = Math.max(world.surfaceAt(player.x - fx * c.dist, player.z - fz * c.dist, py) + 1.5, py + c.h); want.set(player.x - fx * c.dist, gy, player.z - fz * c.dist); look.y = 1 + py; }
     const k = snap ? 1 : 1 - Math.exp(-dt * 5);
     camPos.lerp(want, k); camLook.lerp(look, k);
   }
@@ -184,27 +184,12 @@ function updateCamera(dt, snap = false) {
 
 // ---------- Мини-карта ----------
 const mm = $('minimap'), mctx = mm.getContext('2d');
-const MX0 = -720, MZ0 = -4400, MAP_SIZE = 5120, MAP_PX = 2048, MS = MAP_PX / MAP_SIZE;   // город + горы на северо-востоке
+const MX0 = -1840, MZ0 = -1840, MAP_SIZE = 3680, MAP_PX = 2048, MS = MAP_PX / MAP_SIZE;   // весь город
 const mapCanvas = document.createElement('canvas'); mapCanvas.width = mapCanvas.height = MAP_PX;
 function drawMapBase() {
-  const g = mapCanvas.getContext('2d'), PX = v => (v - MX0) * MS, PZ = v => (v - MZ0) * MS;
+  const g = mapCanvas.getContext('2d');
   g.fillStyle = '#1c1d20'; g.fillRect(0, 0, MAP_PX, MAP_PX);
-  g.fillStyle = '#23261f'; g.fillRect(PX(450), PZ(-4350), 3900 * MS, 3900 * MS);
-  g.fillStyle = '#26362a'; g.beginPath(); g.arc(PX(0), PZ(0), RING_IN * MS, 0, 7); g.fill();
-  g.fillStyle = '#244b57'; g.fillRect(PX(CANAL_X - CANAL_W / 2), PZ(-640), CANAL_W * MS, 1280 * MS);
-  g.fillStyle = '#4a4c52';
-  for (const v of VLINES) g.fillRect(PX(v.x - W[v.t] / 2), PZ(-600), W[v.t] * MS, 1200 * MS);
-  for (const h of HLINES) g.fillRect(PX(-600), PZ(h.z - W[h.t] / 2), 1200 * MS, W[h.t] * MS);
-  g.strokeStyle = '#4a4c52'; g.lineWidth = (RING_OUT - RING_IN) * MS; g.beginPath(); g.arc(PX(0), PZ(0), ((RING_IN + RING_OUT) / 2) * MS, 0, 7); g.stroke();
-  if (terrain) {
-    const L = terrain.mapData();
-    g.save(); g.translate(PX(L.lake.x), PZ(L.lake.z)); g.rotate(-L.lake.rot); g.fillStyle = '#1f6672'; g.beginPath(); g.ellipse(0, 0, L.lake.rx * MS, L.lake.rz * MS, 0, 0, 7); g.fill(); g.restore();
-    g.strokeStyle = '#5a5c62'; g.lineWidth = 18 * MS + 1; g.lineCap = 'round'; g.beginPath();
-    L.path.forEach((p, i) => (i ? g.lineTo(PX(p.x), PZ(p.z)) : g.moveTo(PX(p.x), PZ(p.z)))); g.stroke();
-    g.fillStyle = '#f2f0ea'; for (const q of [L.amir, L.end]) { g.beginPath(); g.arc(PX(q.x), PZ(q.z), 6, 0, 7); g.fill(); }
-  }
-  g.fillStyle = '#6f6a5c';
-  for (const l of world.labels) { g.beginPath(); g.arc(PX(l.x), PZ(l.z), 3, 0, 7); g.fill(); }
+  world.drawMap(g, v => (v - MX0) * MS, v => (v - MZ0) * MS, MS);
 }
 function drawMinimap() {
   const Wd = mm.width, s = 1.6;
@@ -263,12 +248,12 @@ function closeSheets() {
 
 function resetCar() {
   if (mode === 'level') { startLevel(levels.idx); return; }
-  player.reset(SPAWN.x, SPAWN.z, SPAWN.h); camHeading = player.h; updateCamera(0, true);
+  player.reset(world.spawn.x, world.spawn.z, world.spawn.h); camHeading = player.h; updateCamera(0, true);
 }
 
 function startFree() {
   levels.clear();
-  player.reset(SPAWN.x, SPAWN.z, SPAWN.h); camHeading = player.h; updateCamera(0, true);
+  player.reset(world.spawn.x, world.spawn.z, world.spawn.h); camHeading = player.h; updateCamera(0, true);
   enterPlay('free');
   toast(isTouch ? 'Красная точка на карте — автодром' : 'WASD — ехать · Пробел — ручник · C — камера • M — карта', 4000);
 }
@@ -377,66 +362,32 @@ $('btn-buy').onclick = () => {
 };
 
 // ---------- Светофоры: подсказка и штраф за красный ----------
-let lastCell = null, fineCooldown = 0;
-function nearestLine(arr, v) { let best = arr[0]; for (const a of arr) if (Math.abs(a - v) < Math.abs(best - v)) best = a; return best; }
+let lastSig = null, fineCooldown = 0;
 function trafficCheck(dt) {
   fineCooldown -= dt;
   const fx = Math.cos(player.h), fz = -Math.sin(player.h);
-  const ns = Math.abs(fz) > Math.abs(fx);
-  const grp = ns ? 'NS' : 'EW';
-  const st = world.signalState?.[grp];
-  // ближайший перекрёсток впереди по ходу движения
-  const X = nearestLine(VLINES.map(v => v.x), player.x + fx * 40), Z = nearestLine(HLINES.map(h => h.z), player.z + fz * 40);
-  const ahead = (X - player.x) * fx + (Z - player.z) * fz;
-  const onLine = ns ? Math.abs(player.x - X) < 16 : Math.abs(player.z - Z) < 16;
-  const centre = Math.hypot(X, Z) < 1;
-  const show = mode === 'free' && st && onLine && !centre && ahead > 0 && ahead < 90;
-  $('signal').hidden = !show;
-  if (show) {
+  const a = mode === 'free' && (player.y || 0) < 1 ? world.signalAhead(player.x, player.z, fx, fz) : null;
+  const st = a && world.signalState?.[a.grp];
+  $('signal').hidden = !(a && st && !a.inside);
+  if (a && st) {
     for (const c of ['r', 'y', 'g']) $('signal').querySelector('.' + c).classList.toggle('on', c === st);
-    $('signal-t').textContent = world.signalLeft?.[grp] || '';
+    $('signal-t').textContent = world.signalLeft?.[a.grp] || '';
   }
-  // въезд на перекрёсток на красный
-  const V = VLINES.find(v => Math.abs(v.x - player.x) < W[v.t] / 2), H = HLINES.find(h => Math.abs(h.z - player.z) < W[h.t] / 2);
-  const cell = V && H && !(V.x === 0 && H.z === 0) ? `${V.x},${H.z}` : null;
-  if (cell && cell !== lastCell && mode === 'free' && Math.abs(player.speed) > 3 && st === 'r' && fineCooldown <= 0) {
+  const inside = a && a.inside ? a.n : null;          // въезд на перекрёсток на красный
+  if (inside && inside !== lastSig && Math.abs(player.speed) > 3 && st === 'r' && fineCooldown <= 0) {
     save.money = Math.max(0, save.money - 50); persist(); updateMoney(); fineCooldown = 4;
     toast('Проезд на красный: штраф 50 сум', 2600, true);
   }
-  lastCell = cell;
-}
-
-// ---------- Два уровня: тоннель и эстакада ----------
-const S_REACH = S_FLAT + S_RAMP;
-function structAt(x, z) {
-  for (let i = 0; i < STRUCTS.length; i++) { const S = STRUCTS[i], q = structUV(S, x, z); if (Math.abs(q.u) < 13.6 && Math.abs(q.v - S.node) < S_REACH) return { S, i, q }; }
-  return null;
-}
-function updateLayer(v) {
-  const a = structAt(v.x, v.z);
-  if (!a) { v.layer = 0; return; }
-  if (v.layer === undefined || v.layer === null) v.layer = 0;
-  if (!v._inStruct) v.layer = Math.abs(a.q.v - a.S.node) > S_REACH - 8 ? 10 + a.i : 0;   // въезд с торца — на полотно
-  v._inStruct = true;
-}
-function hAt(x, z, layer) {
-  if (layer >= 10) { const S = STRUCTS[layer - 10], q = structUV(S, x, z); if (Math.abs(q.v - S.node) < S_REACH) return structProfile(S, q.v); }
-  return terrain.heightAt(x, z);
+  lastSig = inside;
 }
 
 // ---------- Большая карта с названиями мест ----------
 const bm = $('bigmap'), bmc = $('bigmap-c'), bctx = bmc.getContext('2d');
-const PARK_RE = /парк|сад|Park|Сайилгох|Magic/i, CITY_RE = /Стадион|Humo|Вокзал|Цирк|Автодром|Tashkent City|Boulevard|Mall|Тоннель|Эстакада|Darvoza|Planet|Театр/i;
+const PARK_RE = /парк/i, CITY_RE = /Стадион|Арена|Вокзал|Автодром|Торговый|Тоннель|Эстакада|Порт|АЗС/;
 let bmView = { x: 0, z: 0, k: 0.6 }, bmOpen = false, places = null;
 function mapPlaces() {
-  const out = world.labels.map(l => ({ x: l.x, z: l.z, text: l.text, cat: PARK_RE.test(l.text) ? 'park' : CITY_RE.test(l.text) ? 'city' : 'sight' }));
-  if (terrain) {
-    const L = terrain.mapData();
-    out.push({ x: L.lake.x, z: L.lake.z, text: 'Чарвакское водохранилище', cat: 'mount', big: true },
-      { x: L.amir.x, z: L.amir.z, text: 'Амирсай', cat: 'mount', big: true }, { x: L.end.x, z: L.end.z, text: 'Бельдерсай', cat: 'mount', big: true },
-      { x: 0, z: 0, text: 'Ташкент', cat: 'city', big: true, far: true });
-  }
-  const pri = { sight: 0, mount: 0, city: 1, park: 2 };
+  const out = world.labels.map(l => ({ x: l.x, z: l.z, text: l.text, big: l.district, cat: l.district ? 'mount' : PARK_RE.test(l.text) ? 'park' : CITY_RE.test(l.text) ? 'city' : 'sight' }));
+  const pri = { mount: 0, sight: 1, city: 2, park: 3 };
   return out.sort((a, b) => pri[a.cat] - pri[b.cat]);
 }
 const CAT_COL = { sight: '#f0b03c', park: '#5cc27a', city: '#e8e4dc', mount: '#6cc4e0' };
@@ -449,21 +400,9 @@ function drawBigMap() {
   const SX = x => Wd / 2 + (x - bmView.x) * k, SZ = z => H / 2 + (z - bmView.z) * k;
   g.imageSmoothingEnabled = true;
   g.drawImage(mapCanvas, SX(MX0), SZ(MZ0), MAP_SIZE * k, MAP_SIZE * k);
-  if (k > 0.35) {         // город поверх — чёткими линиями
-    g.fillStyle = '#26282c'; g.fillRect(SX(-640), SZ(-640), 1280 * k, 1280 * k);
-    g.fillStyle = '#2c3a2f'; g.beginPath(); g.arc(SX(0), SZ(0), RING_IN * k, 0, 7); g.fill();
-    g.fillStyle = '#244b57'; g.fillRect(SX(CANAL_X - CANAL_W / 2), SZ(-640), CANAL_W * k, 1280 * k);
-    g.fillStyle = '#55585f';
-    for (const v of VLINES) g.fillRect(SX(v.x - W[v.t] / 2), SZ(-600), W[v.t] * k, 1200 * k);
-    for (const h of HLINES) g.fillRect(SX(-600), SZ(h.z - W[h.t] / 2), 1200 * k, W[h.t] * k);
-    g.strokeStyle = '#55585f'; g.lineWidth = (RING_OUT - RING_IN) * k; g.beginPath(); g.arc(SX(0), SZ(0), ((RING_IN + RING_OUT) / 2) * k, 0, 7); g.stroke();
-    if (k > 0.8) { g.strokeStyle = '#6c6f77'; g.lineWidth = 1; g.setLineDash([6, 6]);
-      for (const v of VLINES) { g.beginPath(); g.moveTo(SX(v.x), SZ(-600)); g.lineTo(SX(v.x), SZ(600)); g.stroke(); }
-      for (const h of HLINES) { g.beginPath(); g.moveTo(SX(-600), SZ(h.z)); g.lineTo(SX(600), SZ(h.z)); g.stroke(); }
-      g.setLineDash([]); }
-  }
+  if (k > 0.45) world.drawMap(g, SX, SZ, k);
   // места: сначала все точки, потом подписи поверх (подписи не налезают друг на друга)
-  const vis = places.filter(p => (k < 0.3 ? p.big : !p.far)).map(p => ({ p, px: SX(p.x), py: SZ(p.z) })).filter(q => q.px > -100 && q.py > -40 && q.px < Wd + 100 && q.py < H + 40);
+  const vis = places.filter(p => (k < 0.3 ? p.big || p.cat === 'sight' : !p.far)).map(p => ({ p, px: SX(p.x), py: SZ(p.z) })).filter(q => q.px > -100 && q.py > -40 && q.px < Wd + 100 && q.py < H + 40);
   for (const { p, px, py } of vis) { g.fillStyle = CAT_COL[p.cat]; g.strokeStyle = '#141316'; g.lineWidth = 2.5; g.beginPath(); g.arc(px, py, p.big ? 7 : 5, 0, 7); g.fill(); g.stroke(); }
   const boxes = [];
   for (const { p, px, py } of vis) {
@@ -490,8 +429,7 @@ function drawBigMap() {
 }
 function bmGo(where) {
   const Wd = bmc.clientWidth || innerWidth, H = bmc.clientHeight || innerHeight, fit = Math.min(Wd, H);
-  if (where === 'city') bmView = { x: 0, z: 0, k: Math.max(fit / 1350, 0.45) };
-  else if (where === 'mount') { const L = terrain.mapData(); bmView = { x: (L.lake.x + L.end.x) / 2 - 200, z: (L.lake.z + L.end.z) / 2 - 100, k: fit / 2800 }; }
+  if (where === 'city') bmView = { x: 0, z: 0, k: fit / 3000 };
   else bmView = { x: player.x, z: player.z, k: Math.max(bmView.k, fit / 700) };
   bm.querySelectorAll('[data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === where));
   drawBigMap();
@@ -501,7 +439,7 @@ function openBigMap() {
   places = places || mapPlaces();
   bmOpen = true; paused = true; bm.hidden = false;
   Object.keys(input).forEach(k => (input[k] = false));
-  bmGo(player.x > HALF + 200 || player.z < -HALF - 200 ? 'mount' : 'city');
+  bmGo('city');
 }
 function closeBigMap() { if (!bmOpen) return; bmOpen = false; bm.hidden = true; paused = false; clock.getDelta(); }
 const bmZoom = (f, cx, cy) => {
@@ -542,13 +480,14 @@ function frame() {
   } else if (playing()) {
     // уклон дороги: разница высот под передом и задом машины
     const hx = Math.cos(player.h), hz = -Math.sin(player.h), hl = player.spec.len / 2, hw = player.spec.wid / 2;
-    const L = player.layer || 0;
-    const yF = hAt(player.x + hx * hl, player.z + hz * hl, L), yB = hAt(player.x - hx * hl, player.z - hz * hl, L);
+    const Y = player.y || 0, hAt = (x, z) => world.surfaceAt(x, z, Y);
+    const yF = hAt(player.x + hx * hl, player.z + hz * hl), yB = hAt(player.x - hx * hl, player.z - hz * hl);
     player.grade = (yF - yB) / player.spec.len;
-    const hit = player.update(dt, input, world.obstacles, 3600);
-    { const was = !!structAt(player.x, player.z); if (!was) player._inStruct = false; updateLayer(player); }
-    player.y = hAt(player.x, player.z, player.layer);
-    const yL = hAt(player.x + hz * hw, player.z - hx * hw, player.layer), yR = hAt(player.x - hz * hw, player.z + hx * hw, player.layer);
+    const hit = player.update(dt, input, world.obstacles, CITY_HALF);
+    const yN = world.surfaceAt(player.x, player.z, Y);
+    player.vy = yN < Y - 0.4 ? (player.vy || 0) - 9.81 * dt : 0;          // падение с края — с ускорением
+    player.y = player.vy ? Math.max(yN, Y + player.vy * dt) : yN;
+    const yL = hAt(player.x + hz * hw, player.z - hx * hw), yR = hAt(player.x - hz * hw, player.z + hx * hw);
     const k = 1 - Math.exp(-dt * 10);
     player.tPitch = (player.tPitch || 0) + (Math.atan2(yF - yB, player.spec.len) - (player.tPitch || 0)) * k;
     player.tRoll = (player.tRoll || 0) + (Math.atan2(yL - yR, player.spec.wid) - (player.tRoll || 0)) * k;
@@ -588,18 +527,16 @@ function frame() {
   show('loading');
   $('load-bar').style.width = '15%';
   await loadCarModels();
-  $('load-bar').style.width = '55%'; $('load-text').textContent = 'Строим Ташкент…';
+  $('load-bar').style.width = '55%'; $('load-text').textContent = 'Строим город…';
   await nextFrame();
-  world = new World(scene);
-  $('load-bar').style.width = '75%'; $('load-text').textContent = 'Дорога в горы…';
-  await nextFrame();
-  terrain = new Terrain(scene, world.obstacles);
+  world = new City(scene);
+  $('load-bar').style.width = '75%';
   levels = new LevelRunner(scene, world.obstacles);
   $('load-bar').style.width = '90%'; $('load-text').textContent = 'Открываем ангар…';
   await nextFrame();
   hangar = new Hangar(scene);
   player = new Vehicle(carById(save.car));
-  player.reset(SPAWN.x, SPAWN.z, SPAWN.h); camHeading = player.h;
+  player.reset(world.spawn.x, world.spawn.z, world.spawn.h); camHeading = player.h;
   rebuildPlayer();
   drawMapBase();
   $('credits').textContent = CREDITS.join(' · ');
@@ -611,5 +548,5 @@ function frame() {
   show('menu');
   setScene(true);
   requestAnimationFrame(frame);
-  window.__game = { player, world, levels, save, startLevel, startFree, input, camera, terrain, hangar };
+  window.__game = { player, world, levels, save, startLevel, startFree, input, camera, hangar };
 })();

@@ -22,7 +22,7 @@ export const HLINES = [
 const XS = [-580, -420, -290, CANAL_X, -110, 0, 130, 270, 430, 580];
 const ZS = HLINES.map(l => l.z);
 
-export const LEVEL_CENTER = { x: 350, z: 365 };
+export const LEVEL_CENTER = { x: 1020, z: 980 };          // автодром (в новом городе)
 // Двухуровневые узлы: тоннель на пр. Амира Темура под улицей у Tashkent City и эстакада на пр. Навои
 export const STRUCTS = [
   { axis: 'v', line: 0, node: -290, D: -6.5, name: 'Тоннель' },
@@ -355,9 +355,10 @@ export class World {
     this.batches = new Map(); this.carBuckets = new Map();
     this.trees = []; this.lamps = []; this.labels = [];
     makeTextures(); makeMaterials(); makeSignalMaterials(this);
-    this.ground(); this.roads(); this.ringAndSquare(); this.canal(); this.cells(); this.mountains();
+    this.generate();
     this.finish();
   }
+  generate() { this.ground(); this.roads(); this.ringAndSquare(); this.canal(); this.cells(); this.mountains(); }
 
   // ---------- примитивы, которые склеиваются в общие пачки по материалу ----------
   push(mat, geo) { if (!this.batches.has(mat)) this.batches.set(mat, []); this.batches.get(mat).push(geo); }
@@ -393,7 +394,7 @@ export class World {
     const living = [M.panel, M.panel2, M.brick, M.office, M.panelPeach, M.panelBlue, M.panelYellow, M.modernA, M.modernB, M.modernC, M.redBrick].includes(mat);
     if (living && floors >= 3) {
       const long = w >= d, L = long ? w : d, D = long ? d : w;
-      const side = (Math.floor(x * 7 + z * 3) & 1) ? 1 : -1;
+      const side = opts.face !== undefined ? -opts.face : (Math.floor(x * 7 + z * 3) & 1) ? 1 : -1;
       // подъезды с козырьками и дверями
       const n = Math.max(1, Math.floor(L / 18));
       for (let k = 0; k < n; k++) {
@@ -691,8 +692,8 @@ export class World {
 
   // Светофор для подъезда к перекрёстку (cx, cz) с направлением движения (dx, dz).
   // Столб справа перед перекрёстком, консоль над полосами, вторая секция на столбе и табло с отсчётом.
-  signal(cx, cz, dx, dz, laneHalf, crossHalf) {
-    const group = dz ? 'NS' : 'EW';
+  signal(cx, cz, dx, dz, laneHalf, crossHalf, opts = {}) {
+    const group = opts.grp || (dz ? 'NS' : 'EW');
     const rx = -dz, rz = dx;                                   // вправо от направления движения
     const px = cx - dx * (crossHalf + 2) + rx * (laneHalf + 1.2), pz = cz - dz * (crossHalf + 2) + rz * (laneHalf + 1.2);
     const face = Math.atan2(-dx, -dz);                         // лицевая сторона смотрит на подъезжающих
@@ -734,12 +735,13 @@ export class World {
     // стоп-линия и стрелки направлений на полосах правой половины дороги
     const inner = laneHalf > 10 ? 2.2 : 0.3, outer = laneHalf - 0.4, mid = (inner + outer) / 2;
     const at = (back, u) => [cx - dx * back + rx * u, cz - dz * back + rz * u];
-    const [slx, slz] = at(crossHalf + 11, mid);
-    this.quad(M.mark, slx, 0.066, slz, dz ? outer - inner : 0.5, dz ? 0.5 : outer - inner, 0, 1, 1);
+    const [slx, slz] = at(crossHalf + (opts.stop || 11), mid);
+    if (opts.grp) this.quad(M.mark, slx, 0.066, slz, outer - inner, 0.5, face, 1, 1);
+    else this.quad(M.mark, slx, 0.066, slz, dz ? outer - inner : 0.5, dz ? 0.5 : outer - inner, 0, 1, 1);
     const lanes = laneHalf > 10 ? 3 : 2, lw = (outer - inner) / lanes;
     for (let i = 0; i < lanes; i++) {
       const mat = i === 0 ? M.arrowSL : i === lanes - 1 ? M.arrowSR : M.arrowS;
-      const [ax, az] = at(crossHalf + 19, inner + lw * (i + 0.5));
+      const [ax, az] = at(crossHalf + (opts.arrow || 19), inner + lw * (i + 0.5));
       this.quad(mat, ax, 0.067, az, 1.3, 5, face, 1, 1);
     }
   }
@@ -1860,7 +1862,12 @@ export class World {
 
   finish() {
     const flat = FLAT();
-    for (const [mat, list] of this.batches) {
+    const TILE = 500, tiles = new Map();          // режем город на квадраты — невидимые не рисуются
+    for (const [mat, list] of this.batches) for (const g of list) {
+      const p = g.attributes.position, k = Math.floor(p.getX(0) / TILE) + ':' + Math.floor(p.getZ(0) / TILE);
+      const key = mat.uuid + k; if (!tiles.has(key)) tiles.set(key, [mat, []]); tiles.get(key)[1].push(g);
+    }
+    for (const [, [mat, list]] of tiles) {
       const norm = list.map(g => {
         const n = g.index ? g.toNonIndexed() : g;
         for (const k of Object.keys(n.attributes)) if (!['position', 'normal', 'uv'].includes(k)) n.deleteAttribute(k);
@@ -1882,7 +1889,7 @@ export class World {
 
   instancedTrees() {
     const d = new THREE.Object3D(), col = new THREE.Color();
-    const trees = this.trees.filter(t => t.noCollide || Math.hypot(t.x, t.z) > RING_OUT + 1);
+    const trees = this.isCity ? this.trees : this.trees.filter(t => t.noCollide || Math.hypot(t.x, t.z) > RING_OUT + 1);
     // ствол с двумя ветвями
     const trunkParts = [new THREE.CylinderGeometry(0.2, 0.32, 4.2, 8).translate(0, 2.1, 0)];
     for (const [a, t] of [[0.6, 0.5], [-0.7, 2.6]]) { const b = new THREE.CylinderGeometry(0.06, 0.12, 2.0, 6); b.translate(0, 1, 0); b.rotateZ(0.7); b.rotateY(t); b.translate(0, 3.2 + a * 0.4, 0); trunkParts.push(b); }
@@ -1891,7 +1898,7 @@ export class World {
     // крона: несколько мягких «облаков» листвы, снизу темнее (вершинные цвета умножаются на цвет экземпляра)
     const lobes = [[0, 0.2, 0, 0.8], [0.5, -0.08, 0.28, 0.62], [-0.48, -0.02, 0.24, 0.62], [0.05, -0.05, -0.55, 0.62]];
     const crownG = mergeGeometries(lobes.map(([x, y, z, r]) => {
-      const g = new THREE.SphereGeometry(r, 10, 7);          // индексированная — сглаженные нормали
+      const g = new THREE.SphereGeometry(r, this.isCity ? 7 : 10, this.isCity ? 5 : 7);          // индексированная — сглаженные нормали
       const p = g.attributes.position;
       for (let k = 0; k < p.count; k++) { const f = 1 + Math.sin(p.getX(k) * 19 + p.getY(k) * 13) * 0.05 + Math.cos(p.getZ(k) * 17) * 0.05; p.setXYZ(k, p.getX(k) * f, p.getY(k) * f, p.getZ(k) * f); }
       g.computeVertexNormals(); g.translate(x, y, z); return g.toNonIndexed();
@@ -1904,7 +1911,8 @@ export class World {
     trees.forEach((t, i) => {
       const s = t.s;
       d.rotation.set(0, (t.x * 13.7) % 6.28, 0);
-      d.position.set(t.x, 0, t.z); d.scale.set(s, t.kind === 'poplar' ? s * 1.6 : s, s); d.updateMatrix();
+      const ty = t.y || 0;
+      d.position.set(t.x, ty, t.z); d.scale.set(s, t.kind === 'poplar' ? s * 1.6 : s, s); d.updateMatrix();
       trunks.setMatrixAt(i, d.matrix); whites.setMatrixAt(i, d.matrix);
       let cy = 6 * s, sx = 3.4 * s, sy = 2.8 * s;
       if (t.kind === 'poplar') { cy = 8.5 * s; sx = 1.5 * s; sy = 5.5 * s; }
@@ -1915,8 +1923,9 @@ export class World {
         d.position.set(t.x, -5, t.z); d.scale.set(0.01, 0.01, 0.01); d.updateMatrix(); trunks.setMatrixAt(i, d.matrix); whites.setMatrixAt(i, d.matrix);
         d.position.set(t.x, 0.5, t.z); cy = 0.62; sx = 0.8 * s; sy = 0.5 * s;
       }
-      d.position.y = cy; d.scale.set(sx, sy, sx); d.updateMatrix(); crowns.setMatrixAt(i, d.matrix);
-      const hue = t.kind === 'willow' ? 0.2 : t.kind === 'poplar' || t.kind === 'shrub' ? 0.28 : 0.23;
+      if (t.kind === 'pine') { cy = 5.5 * s; sx = 2.2 * s; sy = 4.6 * s; }
+      d.position.y = cy + ty; d.scale.set(sx, sy, sx); d.updateMatrix(); crowns.setMatrixAt(i, d.matrix);
+      const hue = t.kind === 'willow' ? 0.2 : t.kind === 'poplar' || t.kind === 'shrub' || t.kind === 'pine' ? 0.28 : 0.23;
       if (t.kind === 'sakura') crowns.setColorAt(i, col.setHSL(0.93 + Math.random() * 0.03, 0.55, 0.78 + Math.random() * 0.06));
       else crowns.setColorAt(i, col.setHSL(hue + Math.random() * 0.04, 0.45, 0.22 + Math.random() * 0.08));
       if (!t.noCollide) this.obstacles.add({ x: t.x, z: t.z, h: 0, hl: 0.35, hw: 0.35 });
@@ -1940,13 +1949,14 @@ export class World {
     for (const l of this.lamps) {
       // плечо фонаря направлено поперёк дороги: для вертикальной дороги — по оси x
       const across = l.rot === 0 ? 0 : -Math.PI / 2;
-      if (l.double) { items.push({ x: l.x, z: l.z, a: across }); items.push({ x: l.x, z: l.z, a: across + Math.PI }); }
+      if (l.a !== undefined) { items.push({ x: l.x, z: l.z, a: l.a, y: l.y || 0 }); if (l.double) items.push({ x: l.x, z: l.z, a: l.a + Math.PI, y: l.y || 0 }); }
+      else if (l.double) { items.push({ x: l.x, z: l.z, a: across }); items.push({ x: l.x, z: l.z, a: across + Math.PI }); }
       else items.push({ x: l.x, z: l.z, a: across + ((l.side > 0) === (l.rot === 0) ? Math.PI : 0) });
-      this.obstacles.add({ x: l.x, z: l.z, h: 0, hl: 0.15, hw: 0.15 });
+      this.obstacles.add({ x: l.x, z: l.z, h: 0, hl: 0.15, hw: 0.15, y0: (l.y || 0) - 2, y1: (l.y || 0) + 9 });
     }
     const n = items.length;
     const poles = new THREE.InstancedMesh(poleG, steel, n), arms = new THREE.InstancedMesh(armG, steel, n), heads = new THREE.InstancedMesh(headG, M.lightOn, n);
-    items.forEach((it, i) => { d.position.set(it.x, 0, it.z); d.rotation.set(0, it.a, 0); d.updateMatrix(); poles.setMatrixAt(i, d.matrix); arms.setMatrixAt(i, d.matrix); heads.setMatrixAt(i, d.matrix); });
+    items.forEach((it, i) => { d.position.set(it.x, it.y || 0, it.z); d.rotation.set(0, it.a, 0); d.updateMatrix(); poles.setMatrixAt(i, d.matrix); arms.setMatrixAt(i, d.matrix); heads.setMatrixAt(i, d.matrix); });
     poles.castShadow = true;
     this.root.add(poles, arms, heads);
   }
@@ -1960,3 +1970,5 @@ export function makeStaticCar(spec, color, x, z, h) {
   for (const [mat, list] of buckets) { const m = new THREE.Mesh(mergeGeometries(list), mat); m.castShadow = m.receiveShadow = true; g.add(m); }
   return { mesh: g, obstacle };
 }
+
+export { M, T, rnd, rr, pick, uvs, canvasTex, normalFrom };
