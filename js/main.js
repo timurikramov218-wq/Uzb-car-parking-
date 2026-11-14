@@ -41,9 +41,15 @@ scene.fog = new THREE.Fog(0xdfe6ea, 400, 7600);
   });
   const sky = new THREE.Mesh(new THREE.SphereGeometry(11000, 32, 16), m); sky.renderOrder = -1; scene.add(sky); scene.userData.sky = sky;
 }
-const hemiMain = new THREE.HemisphereLight(0xdfeeff, 0x9a8a6a, 1.0); scene.add(hemiMain);
+const hemiMain = new THREE.HemisphereLight(0xdfeeff, 0x9a8a6a, 0.55); scene.add(hemiMain);
+// окружение для отражений: машины, стекло и металл выглядят реалистично, а не «пластиком»
+import('three/addons/environments/RoomEnvironment.js').then(({ RoomEnvironment }) => {
+  const pm = new THREE.PMREMGenerator(renderer);
+  scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.55;
+}).catch(() => {});
 const sun = new THREE.DirectionalLight(0xfff0d8, 2.5);
-sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096);
 Object.assign(sun.shadow.camera, { left: -80, right: 80, top: 80, bottom: -80, near: 1, far: 500 });
 sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04;
 scene.add(sun, sun.target);
@@ -573,7 +579,7 @@ function frame() {
   }
   if (world) world.updateSignals(t);
   audio.update(player ? player.speed : 0, input.up || input.down, input.horn, playing());
-  sun.intensity = inHangar ? 0.35 : 2.5; hemiMain.intensity = inHangar ? 0.2 : 1.0;
+  sun.intensity = inHangar ? 0.35 : 2.6; hemiMain.intensity = inHangar ? 0.15 : 0.55;
   if (inHangar) { sun.position.set(HANGAR.x + SUN_OFF.x, SUN_OFF.y, HANGAR.z + SUN_OFF.z); sun.target.position.set(HANGAR.x, 0, HANGAR.z); }
   else if (player) { const py = player.y || 0; sun.position.set(player.x + SUN_OFF.x, SUN_OFF.y + py, player.z + SUN_OFF.z); sun.target.position.set(player.x, py, player.z); }
   scene.userData.sky.position.copy(camera.position);

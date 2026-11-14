@@ -21,6 +21,9 @@ export const CREDITS = [
   'Tashkent Tower — nuraliblender (Sketchfab), CC BY 4.0',
   'Low poly gas station — assetfactory (Sketchfab), Sketchfab Standard',
   'City Park at Sunset — Virginia Vidonis (Sketchfab), CC BY 4.0',
+  'Modern House — Desant_Art (Sketchfab), CC BY 4.0',
+  'Soviet Panel House — mrsanya333 (Sketchfab), CC BY 4.0',
+  'Asian Themed Low Poly Night City Buildings — 99.Miles (Sketchfab), CC BY 4.0',
 ];
 
 // Белый первым: все машины с завода белые
@@ -273,7 +276,7 @@ export async function loadCarModels() {
     const b64 = window.__MODEL_DATA && window.__MODEL_DATA[id];
     return b64 ? loader.parseAsync(Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer, '') : loader.loadAsync(url);
   };
-  const extras = [['tashkent_tower', 'models/tashkent_tower.glb'], ['gas_shell', 'models/city/gas_shell.glb'], ['park_square', 'models/city/park_square.glb']].map(async ([id, url]) => {
+  const extras = [['tashkent_tower', 'models/tashkent_tower.glb'], ['gas_shell', 'models/city/gas_shell.glb'], ['park_square', 'models/city/park_square.glb'], ['modern_house', 'models/city/modern_house.glb'], ['panel_house', 'models/city/panel_house.glb'], ['towers_pack', 'models/city/towers_pack.glb']].map(async ([id, url]) => {
     try { extraModels.set(id, (await load(id, url)).scene); } catch (e) { console.warn('Нет модели', url, e); }
   });
   await Promise.all([...extras, ...CARS.map(async spec => {

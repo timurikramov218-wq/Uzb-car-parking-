@@ -762,6 +762,10 @@ export class City extends World {
     if (main && C.service < 6 && r > 0.07 && r < 0.1 && D.kind !== 'down') return { type: 'service', w: 30, d: 22, back: 4 };
     if (main && C.tune < 3 && r > 0.1 && r < 0.115) return { type: 'tune', w: 30, d: 22, back: 4 };
     if (e && r > 0.965) return { type: 'parking', w: rr(30, 50), d: rr(20, 34), back: 1 };
+    const MH = this.modelParts('modern_house'), PH = this.modelParts('panel_house'), TW = this.modelPieces('towers_pack');
+    if (D.kind === 'sub' && MH && r < 0.55) return { type: 'villa', w: 22, d: 22, back: 3 };
+    if ((D.kind === 'mid' || D.kind === 'old' || D.kind === 'down') && PH && r > 0.55 && r < (D.kind === 'down' ? 0.68 : 0.85)) return { type: 'panelM', w: 30, d: 28, back: 6 };
+    if (D.kind === 'down' && TW && TW.length && r < 0.32) { const k = Math.floor(rnd() * TW.length), sz = TW[k].box.getSize(new THREE.Vector3()); return { type: 'towerM', k, w: sz.x + 6, d: sz.z + 6, back: 4 }; }
     switch (D.kind) {
       case 'down':
         if (r < 0.5) return { type: 'tower', w: rr(26, 40), d: rr(24, 34), back: 4, fl: Math.floor(rr(14, 38)), mat: pick([M.glass, M.modernA, M.modernB, M.modernC, M.office]) };
@@ -825,6 +829,9 @@ export class City extends World {
         break;
       case 'gas': if (this.modelParts('gas_shell')) { const c2 = Math.cos(rot), s2 = Math.sin(rot); this.quad(M.asphalt, x, 0.04, z, w, d, rot, w / 12, d / 12); this.shellStation(x + s2 * face * 1, z + c2 * face * 1, rot, face); } else this.gasStation(x, z, w, d, rot, face); break;
       case 'square': this.parkSquare(x, z, rot); break;
+      case 'villa': this.placeObj(this.modelParts('modern_house'), x, z, rot + (face > 0 ? 0 : Math.PI), 1); break;
+      case 'panelM': this.quad(M.plaza, x, 0.03, z, w + 6, d + 6, rot, (w + 6) / 8, (d + 6) / 8); this.placeObj(this.modelParts('panel_house'), x, z, rot + rnd() * 0.0, 0.265); break;
+      case 'towerM': this.quad(M.plaza, x, 0.03, z, w + 4, d + 4, rot, (w + 4) / 8, (d + 4) / 8); this.placeObj(this.modelPieces('towers_pack')[k.k], x, z, rot, 1); break;
       case 'service': this.serviceShop(x, z, w, d, rot, face, false); break;
       case 'tune': this.serviceShop(x, z, w, d, rot, face, true); break;
       case 'parking': this.parkingLot(x, z, rot, w, d); break;
@@ -938,10 +945,10 @@ export class City extends World {
   }
 
   // ---------- готовые 3D-модели: склеиваем по материалам один раз, потом ставим копии в общие пачки ----------
-  modelParts(id) {
+  modelParts(id, node) {
     (this._mp ||= {});
-    if (this._mp[id] !== undefined) return this._mp[id];
-    const sc = extraModels.get(id); if (!sc) return (this._mp[id] = null);
+    if (!node && this._mp[id] !== undefined) return this._mp[id];
+    const sc = node || extraModels.get(id); if (!sc) return (this._mp[id] = null);
     sc.updateMatrixWorld(true);
     const by = new Map();
     sc.traverse(o => {
@@ -950,6 +957,7 @@ export class City extends World {
       const out = new THREE.BufferGeometry();               // всё в обычные float32: квантованные атрибуты не склеиваются с остальными
       for (const k of ['position', 'normal', 'uv']) { const a = g.attributes[k]; if (!a) continue; const n = a.itemSize, arr = new Float32Array(a.count * n); for (let i = 0; i < a.count; i++) for (let c = 0; c < n; c++) arr[i * n + c] = a.getComponent(i, c); out.setAttribute(k, new THREE.BufferAttribute(arr, n)); }
       const m = o.material; m.side = THREE.FrontSide;
+      for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap']) if (m[k]) m[k].anisotropy = 8;
       if (!by.has(m)) by.set(m, []);
       if (o.isInstancedMesh) {                             // одинаковые объекты сохранены как копии одного: разворачиваем все
         const im = new THREE.Matrix4();
@@ -958,7 +966,27 @@ export class City extends World {
     });
     const parts = []; for (const [m, list] of by) parts.push({ m, g: mergeGeometries(list) });
     const box = new THREE.Box3(); for (const p of parts) { p.g.computeBoundingBox(); box.union(p.g.boundingBox); }
-    return (this._mp[id] = { parts, box });
+    const res = { parts, box };
+    return node ? res : (this._mp[id] = res);
+  }
+  // набор зданий в одном файле: каждое — отдельный кусок
+  modelPieces(id) {
+    (this._pc ||= {});
+    if (this._pc[id] !== undefined) return this._pc[id];
+    const sc = extraModels.get(id); if (!sc) return (this._pc[id] = null);
+    sc.updateMatrixWorld(true);
+    let rootN = null; sc.traverse(o => { if (!rootN && o.children.length > 3) rootN = o; });
+    const out = [];
+    for (const ch of rootN.children) { const p = this.modelParts(id, ch); if (!p.parts.length) continue; const sz = p.box.getSize(new THREE.Vector3()); if (sz.y > 45 && sz.y > Math.max(sz.x, sz.z) * 1.5 && Math.max(sz.x, sz.z) < 60) out.push(p); }
+    return (this._pc[id] = out);
+  }
+  placeObj(o, x, z, rot, S) {
+    const c = o.box.getCenter(new THREE.Vector3());
+    const M4 = new THREE.Matrix4().makeTranslation(x, 0, z).multiply(new THREE.Matrix4().makeRotationY(rot)).multiply(new THREE.Matrix4().makeScale(S, S, S)).multiply(new THREE.Matrix4().makeTranslation(-c.x, -o.box.min.y, -c.z));
+    for (const p of o.parts) this.push(p.m, p.g.clone().applyMatrix4(M4));
+    const sz = o.box.getSize(new THREE.Vector3());
+    this.obstacles.add({ x, z, h: rot, hl: sz.x * S / 2, hw: sz.z * S / 2 });
+    return sz.multiplyScalar(S);
   }
   // матрица модели: центр по x/z в точку, поворот, масштаб
   modelMatrix(id, x, z, rotY, scale, center) {
