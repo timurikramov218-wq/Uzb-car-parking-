@@ -6,6 +6,7 @@ import { City, CITY_HALF } from './city.js';
 import { LEVELS, LevelRunner } from './levels.js';
 import { Hangar, HANGAR } from './garage.js';
 import { TUNE, RIMS, tuneOf, tunedSpec, applyTune } from './tuning.js';
+import { Traffic } from './traffic.js';
 
 const $ = id => document.getElementById(id);
 const fmt = n => n.toLocaleString('ru-RU');
@@ -18,7 +19,11 @@ const save = Object.assign({ money: 1500, owned: ['matiz'], car: 'matiz', colors
 if (!CARS.some(c => c.id === save.car)) save.car = 'matiz';
 save.owned = CARS.map(c => c.id);          // все машины бесплатные и сразу в гараже
 const persist = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch {} };
-const colorOf = id => save.colors[id] || WHITE;          // все машины по умолчанию белые
+const colorOf = id => save.colors[id] || WHITE;
+// старые сохранённые цвета — к ближайшему заводскому
+for (const k of Object.keys(save.colors)) if (!COLORS.some(c => c.hex === save.colors[k])) {
+  const a = new THREE.Color(save.colors[k]); save.colors[k] = COLORS.reduce((b, c) => { const d = new THREE.Color(c.hex); const e = (d.r - a.r) ** 2 + (d.g - a.g) ** 2 + (d.b - a.b) ** 2; return e < b.e ? { e, hex: c.hex } : b; }, { e: 9 }).hex;
+}          // все машины по умолчанию белые
 
 // ---------- Рендер ----------
 const renderer = new THREE.WebGLRenderer({ canvas: $('game'), antialias: true, powerPreference: 'high-performance' });
@@ -58,12 +63,12 @@ const SUN_OFF = new THREE.Vector3(90, 160, 60);
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
-let world, levels, player, playerMesh, hangar;
+let world, levels, player, playerMesh, hangar, traffic;
 let inHangar = false;
 // ангар (меню и гараж) или город (езда): показываем только одно, второе не рисуем
 function setScene(h) {
   inHangar = h;
-  hangar.show(h); world.root.visible = !h; if (levels.group) levels.group.visible = !h; if (playerMesh) playerMesh.visible = !h;
+  hangar.show(h); world.root.visible = !h; if (traffic) traffic.setVisible(!h); if (levels.group) levels.group.visible = !h; if (playerMesh) playerMesh.visible = !h;
   if (h) hangar.setCar(buildCarMesh(carById(garageSel || save.car), garageColor || colorOf(garageSel || save.car), save.plate));
 }
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -573,6 +578,8 @@ function frame() {
     const Y = player.y || 0, hAt = (x, z) => world.surfaceAt(x, z, Y);
     const yF = hAt(player.x + hx * hl, player.z + hz * hl), yB = hAt(player.x - hx * hl, player.z - hz * hl);
     player.grade = (yF - yB) / player.spec.len;
+    if (traffic && mode === 'free') traffic.update(dt, player); else player.extra = null;
+    if (traffic) traffic.group.visible = mode === 'free' && !inHangar;
     const noFuel = mode === 'free' && save.fuel <= 0;
     const hit = player.update(dt, player.air ? { up: false, down: false, left: false, right: false, brake: false } : noFuel ? { ...input, up: false } : input, world.obstacles, CITY_HALF);   // в полёте колёса не цепляются
     if (mode === 'free' && hit > 3) { save.damage = Math.min(1, save.damage + (hit - 3) * 0.012); if (save.damage > 0.6 && !player._slowed) { player._slowed = true; player.setSpec(tunedSpec(carById(save.car), tuneOf(save, save.car), save.damage)); toast('Машина повреждена — заедь в автосервис', 3000, true); } }
@@ -623,6 +630,7 @@ function frame() {
   sun.intensity = inHangar ? 0.35 : 2.6; hemiMain.intensity = inHangar ? 0.15 : 0.55;
   if (inHangar) { sun.position.set(HANGAR.x + SUN_OFF.x, SUN_OFF.y, HANGAR.z + SUN_OFF.z); sun.target.position.set(HANGAR.x, 0, HANGAR.z); }
   else if (player) { const py = player.y || 0; sun.position.set(player.x + SUN_OFF.x, SUN_OFF.y + py, player.z + SUN_OFF.z); sun.target.position.set(player.x, py, player.z); }
+  if (world && world.ready && !inHangar) world.updateInstances(camera.position.x, camera.position.z);
   scene.userData.sky.position.copy(camera.position);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -645,6 +653,7 @@ function frame() {
   window.__game = { player, world, levels, save, startLevel, startFree, input, camera, hangar };
   await world.buildAsync(p => { $('title-bar').style.width = $('load-bar').style.width = Math.round(p * 100) + '%'; });
   player.reset(world.spawn.x, world.spawn.z, world.spawn.h); camHeading = player.h;
+  traffic = new Traffic(scene, world); traffic.setVisible(!inHangar); window.__game.traffic = traffic;
   drawMapBase();
   cityReady = true; $('title-progress').classList.add('done');
   if (mode === 'garage') renderGarage();

@@ -241,3 +241,19 @@ h2 { font: 300 26px/1.1 var(--font); letter-spacing: 0.02em; margin: 0; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 @media (max-width: 720px) { .topbar .wordmark { display: none; } .gname small { display: none; } }
 #game { touch-action: none; }
+/* сенсорные экраны: внизу только управление, всё остальное наверху — ничего не перекрывается */
+@media (pointer: coarse) {
+  #minimap { top: max(68px, calc(env(safe-area-inset-top) + 68px)); bottom: auto; width: 110px; height: 110px; }
+  .hud-signal { top: max(14px, env(safe-area-inset-top)); left: max(68px, calc(env(safe-area-inset-left) + 68px)); }
+  .hud-speed { bottom: auto; top: max(110px, calc(env(safe-area-inset-top) + 110px)); right: max(20px, env(safe-area-inset-right)); }
+  .hud-speed b { font-size: 44px; }
+  .hud-gauges { bottom: auto; top: max(190px, calc(env(safe-area-inset-top) + 190px)); }
+  .map-btn { top: max(56px, calc(env(safe-area-inset-top) + 56px)); }
+  .svc-btn { bottom: auto; top: max(80px, calc(env(safe-area-inset-top) + 80px)); }
+  .t-left { gap: 18px; }
+  .t-left button { width: 84px; height: 84px; }
+  .t-right { gap: 18px; }
+  .t-small { gap: 14px; margin-right: 4px; }
+  .pedal { width: 78px; height: 104px; }
+  .pedal.gas { width: 86px; height: 132px; }
+}

@@ -15,6 +15,7 @@ for (const n of root.listNodes()) {
   if (/collider|flare/i.test(n.getName()) || (dropN && dropN.test(n.getName()))) { n.dispose(); continue; }
   const m = n.getMesh(); if (m && dropM) for (const p of m.listPrimitives()) if (dropM.test(p.getMaterial()?.getName() || '')) p.dispose();
 }
+if (cfg.flat) for (const m of root.listMeshes()) for (const p of m.listPrimitives()) { p.setAttribute('NORMAL', null); if (!p.getMaterial()?.getBaseColorTexture()) p.setAttribute('TEXCOORD_0', null); }
 await doc.transform(metalRough(), weld());
 for (const mat of root.listMaterials()) {
   const c = cfg.color?.[mat.getName()];
@@ -24,7 +25,7 @@ await MeshoptSimplifier.ready; await MeshoptEncoder.ready;
 const maxTri = cfg.maxTri || 1e9, ratio = cfg.ratio || 0.5;
 for (const m of root.listMeshes()) for (const p of m.listPrimitives()) {
   const t = (p.getIndices()?.getCount() || 0) / 3;
-  if (t > maxTri) simplifyPrimitive(p, { simplifier: MeshoptSimplifier, ratio: Math.max(ratio, maxTri / t * 0.5), error: cfg.err || 0.01, lockBorder: true });
+  if (t > maxTri) simplifyPrimitive(p, { simplifier: MeshoptSimplifier, ratio: Math.max(ratio, maxTri / t * 0.5), error: cfg.err || 0.01, lockBorder: !cfg.noLock });
 }
 await doc.transform(dedup(), prune(), textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [cfg.tex || 1024, cfg.tex || 1024], quality: 86 }), meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
 await io.write(out, doc);

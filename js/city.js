@@ -152,6 +152,7 @@ export class City extends World {
         q.push(() => this.signals());
         q.push(() => this.spawnPoint());
         q.push(() => this.finish());
+        q.push(() => this.buildInstances());
       });
     });
     let done = 0;
@@ -166,24 +167,35 @@ export class City extends World {
 
   // ---------- текстуры дорог с разметкой ----------
   cityTextures() {
-    const road = (w, lines) => {             // lines: [позиция м, 'solid'|'dash'|'double']
-      const t = canvasTex(512, 1024, (g, Wd, H) => {
-        g.drawImage(T.asphalt.image, 0, 0, Wd, H);
-        const k = Wd / w; g.fillStyle = '#ecebe4';
-        for (const [x, kind] of lines) {
-          const px = x * k;
+    // чистый свежий асфальт: ровный тёмный тон и мелкое зерно (без пятен и трещин)
+    const asph = canvasTex(1024, 1024, (g, W, H) => {
+      g.fillStyle = '#34363a'; g.fillRect(0, 0, W, H);
+      const img = g.getImageData(0, 0, W, H), d = img.data;
+      for (let i = 0; i < d.length; i += 4) { const n = (Math.random() - 0.5) * 26 + (Math.random() < 0.04 ? 22 : 0); d[i] += n; d[i + 1] += n; d[i + 2] += n + 1; }
+      g.putImageData(img, 0, 0);
+    });
+    T.cleanAsph = asph;
+    const asphN = normalFrom(asph, 1.2);
+    const YEL = '#e9b51f', WHT = '#f1f1ec';
+    const road = (w, lines) => {             // lines: [позиция м, вид, цвет]
+      const t = canvasTex(1024, 2048, (g, Wd, H) => {
+        g.drawImage(asph.image, 0, 0, Wd, H / 2); g.drawImage(asph.image, 0, H / 2, Wd, H / 2);
+        const k = Wd / w;
+        for (const [x, kind, col] of lines) {
+          const px = x * k; g.fillStyle = col || WHT;
           if (kind === 'solid') g.fillRect(px - 0.075 * k, 0, 0.15 * k, H);
-          else if (kind === 'double') { g.fillRect(px - 0.25 * k, 0, 0.13 * k, H); g.fillRect(px + 0.12 * k, 0, 0.13 * k, H); }
+          else if (kind === 'double') { g.fillRect(px - 0.24 * k, 0, 0.12 * k, H); g.fillRect(px + 0.12 * k, 0, 0.12 * k, H); }
           else g.fillRect(px - 0.075 * k, 0, 0.15 * k, H * 0.25);
         }
       });
-      t.wrapS = THREE.ClampToEdgeWrapping;
-      return new THREE.MeshStandardMaterial({ map: t, roughness: 0.92, normalMap: normalFrom(T.asphalt, 2), polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
+      t.wrapS = THREE.ClampToEdgeWrapping; t.anisotropy = 16;
+      return new THREE.MeshStandardMaterial({ map: t, roughness: 0.82, normalMap: asphN, normalScale: new THREE.Vector2(0.5, 0.5), polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
     };
-    M.rMain = road(15, [[0.35, 'solid'], [3.95, 'dash'], [7.5, 'double'], [11.05, 'dash'], [14.65, 'solid']]);
-    M.rStreet = road(9, [[0.3, 'solid'], [4.5, 'dash'], [8.7, 'solid']]);
-    M.rHwy = road(10, [[0.5, 'solid'], [4.5, 'dash'], [9.4, 'solid']]);
-    M.jAsph = new THREE.MeshStandardMaterial({ map: T.asphalt, roughness: 0.92, normalMap: normalFrom(T.asphalt, 2), polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 });
+    M.rMain = road(15, [[0.35, 'solid'], [3.95, 'dash'], [7.5, 'double', YEL], [11.05, 'dash'], [14.65, 'solid']]);
+    M.rStreet = road(9, [[0.3, 'solid'], [4.5, 'dash', YEL], [8.7, 'solid']]);
+    M.rHwy = road(10, [[0.5, 'solid', YEL], [4.5, 'dash'], [9.4, 'solid']]);
+    M.asphalt = new THREE.MeshStandardMaterial({ map: asph, roughness: 0.84, normalMap: asphN, normalScale: new THREE.Vector2(0.5, 0.5) });
+    M.jAsph = new THREE.MeshStandardMaterial({ map: asph, roughness: 0.82, normalMap: asphN, normalScale: new THREE.Vector2(0.5, 0.5), polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 });
     M.walk = new THREE.MeshStandardMaterial({ map: T.sidewalk, roughness: 0.9 });
     M.bridgeC = new THREE.MeshStandardMaterial({ color: 0xc4bfb4, roughness: 0.85 });
     M.bridgeDark = new THREE.MeshStandardMaterial({ color: 0x8d8981, roughness: 0.9, side: THREE.DoubleSide });
@@ -1021,7 +1033,8 @@ export class City extends World {
   placeObj(o, x, z, rot, S, collide = true) {
     const c = o.box.getCenter(new THREE.Vector3());
     const M4 = new THREE.Matrix4().makeTranslation(x, 0, z).multiply(new THREE.Matrix4().makeRotationY(rot)).multiply(new THREE.Matrix4().makeScale(S, S, S)).multiply(new THREE.Matrix4().makeTranslation(-c.x, -o.box.min.y, -c.z));
-    for (const p of o.parts) this.push(p.m, p.g.clone().applyMatrix4(M4));
+    (this.inst ||= new Map()); if (!this.inst.has(o)) this.inst.set(o, []);
+    this.inst.get(o).push({ M4, x, z });                       // копии одной модели рисуются одним вызовом (InstancedMesh)
     const sz = o.box.getSize(new THREE.Vector3());
     if (collide) this.obstacles.add({ x, z, h: rot, hl: sz.x * S / 2, hw: sz.z * S / 2 });
     return sz.multiplyScalar(S);
@@ -1214,6 +1227,28 @@ export class City extends World {
           this.box(M.darkSteel, x, 4.65, z, 7.3, 3.8, 0.2, r);
         }
       }
+    }
+  }
+
+  // здания-копии: одна InstancedMesh на материал модели; видны только копии рядом с камерой
+  buildInstances() {
+    this.instSets = [];
+    for (const [o, list] of this.inst || []) {
+      const H = o.box.max.y - o.box.min.y, R = Math.min(1100, 420 + H * list[0].M4.elements[5] * 6);   // высокие видно издалека
+      const meshes = o.parts.map(p => {
+        if (!p.g.attributes.normal) p.g.computeVertexNormals();
+        const m = new THREE.InstancedMesh(p.g, p.m, list.length); m.frustumCulled = false; m.castShadow = true; m.receiveShadow = true; m.count = 0; this.root.add(m); return m;
+      });
+      this.instSets.push({ list, meshes, R2: R * R });
+    }
+  }
+  updateInstances(cx, cz) {
+    if (this._ic && Math.hypot(cx - this._ic[0], cz - this._ic[1]) < 25) return;
+    this._ic = [cx, cz];
+    for (const S of this.instSets || []) {
+      let n = 0;
+      for (const it of S.list) { const dx = it.x - cx, dz = it.z - cz; if (dx * dx + dz * dz > S.R2) continue; for (const m of S.meshes) m.setMatrixAt(n, it.M4); n++; }
+      for (const m of S.meshes) { m.count = n; m.instanceMatrix.needsUpdate = true; }
     }
   }
 

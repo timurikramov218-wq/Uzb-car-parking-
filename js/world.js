@@ -345,7 +345,7 @@ function makeSignalMaterials(world) {
     M.timer[grp] = new THREE.MeshBasicMaterial({ map: tex });
   }
 }
-const FLAT = () => [M.aveMarked, M.tunnelLight, M.ave, M.st, M.asphalt, M.sidewalk, M.grass, M.dirt, M.plaza, M.lane, M.water, M.zebra, M.field, M.mark, M.yellowMark, M.arrowS, M.arrowSL, M.arrowSR, M.manhole, M.grate, M.gutter, M.aryk];
+const FLAT = () => [M.aveMarked, M.rMain, M.rStreet, M.rHwy, M.jAsph, M.walk, M.riverW, M.tunnelLight, M.ave, M.st, M.asphalt, M.sidewalk, M.grass, M.dirt, M.plaza, M.lane, M.water, M.zebra, M.field, M.mark, M.yellowMark, M.arrowS, M.arrowSL, M.arrowSR, M.manhole, M.grate, M.gutter, M.aryk];
 
 export class World {
   constructor(scene) {

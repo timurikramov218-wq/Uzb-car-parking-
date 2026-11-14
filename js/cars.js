@@ -38,7 +38,7 @@ export const COLORS = [
   { name: 'Жемчуг',         hex: '#e6e1d6', metal: 0.35 },
   { name: 'Серебро',        hex: '#a9adb2', metal: 0.75 },
   { name: 'Графит',         hex: '#4b4f55', metal: 0.6 },
-  { name: 'Чёрный',         hex: '#0d0e10' },
+  { name: 'Чёрный',         hex: '#141518', metal: 0.15 },
   { name: 'Тёмно-синий',    hex: '#1a2c4e', metal: 0.5 },
   { name: 'Бордо',          hex: '#5a1219', metal: 0.45 },
   { name: 'Тёмно-зелёный',  hex: '#1f3a2e', metal: 0.4 },
@@ -389,7 +389,7 @@ function paintMaterial(base, hex) {
     const c = COLORS.find(c => c.hex === hex), metal = c?.metal ?? 0.05;
     const m = new THREE.MeshPhysicalMaterial({
       name: base.name, color: new THREE.Color(hex), map: null, normalMap: base.normalMap || null,
-      metalness: metal, roughness: metal > 0.2 ? 0.38 : 0.3, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.15,
+      metalness: metal, roughness: metal > 0.2 ? 0.38 : 0.3, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.5,
       side: base.side,
     });
     paintCache.set(key, m);
