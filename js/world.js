@@ -291,6 +291,26 @@ function makeMaterials() {
     stopFrame: std({ color: 0x3a3f46, metalness: 0.7, roughness: 0.35 }), stopBoard: std({ color: 0x0c0c0d }),
   });
   M.signs = [0xc23a2b, 0x2b5ea8, 0x2e8a4e, 0xe0a92e, 0xf2efe8].map(c => std({ color: c, emissive: c, emissiveIntensity: 0.15 }));
+  // магазины в стиле korzinka: глянцевый красный фасад, белые объёмные буквы, логотип-тележка
+  M.kRed = std({ color: 0xe3172f, roughness: 0.18, metalness: 0.15, emissive: 0xc20f24, emissiveIntensity: 0.35 });
+  M.kGlass = std({ color: 0x2a2620, metalness: 0.55, roughness: 0.08, emissive: 0x6a4a22, emissiveIntensity: 0.35 });
+  M.kFrame = std({ color: 0x1c1c1e, metalness: 0.6, roughness: 0.4 });
+  M.kWall = std({ color: 0xe9e2d6, roughness: 0.8 });
+  M.kSign = (() => {
+    const t = canvasTex(1024, 256, (g, Wd, H) => {
+      const logo = (dx, dy, col) => {
+        g.fillStyle = col;
+        const bar = (x, y, w) => { const h = 26, r = h / 2; g.beginPath(); g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.arc(x + w - r, y + r, r, -Math.PI / 2, Math.PI / 2); g.lineTo(x + r, y + h); g.arc(x + r, y + r, r, Math.PI / 2, Math.PI * 1.5); g.fill(); };
+        bar(40 + dx, 40 + dy, 80); bar(58 + dx, 80 + dy, 170); bar(68 + dx, 120 + dy, 150); bar(76 + dx, 160 + dy, 130);
+        for (const cx of [92, 168]) { g.beginPath(); g.arc(cx + dx, 214 + dy, 15, 0, Math.PI * 2); g.fill(); }
+        g.font = "900 168px 'Arial Black', 'Arial', sans-serif"; g.textBaseline = 'alphabetic'; g.fillText('korzinka', 270 + dx, 196 + dy);
+      };
+      logo(6, 7, 'rgba(110,8,20,0.9)');  // тень от объёмных букв
+      logo(3, 4, '#b8b8bc');            // торец букв
+      logo(0, 0, '#f4f4f6');
+    }, false);
+    return std({ map: t, transparent: true, alphaTest: 0.4, roughness: 0.35, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.12 });
+  })();
   const label = (w, h, draw) => canvasTex(w, h, draw, false);
   M.bekat = new THREE.MeshBasicMaterial({ map: label(512, 64, g => { g.fillStyle = '#1f56a8'; g.fillRect(0, 0, 512, 64); g.fillStyle = '#fff'; g.font = '600 40px Arial'; g.textBaseline = 'middle'; g.fillText('BEKAT · ОСТАНОВКА', 14, 34); }) });
   M.routes = new THREE.MeshBasicMaterial({ map: label(512, 96, g => { g.fillStyle = '#080808'; g.fillRect(0, 0, 512, 96); g.fillStyle = '#ffb21a'; g.font = 'bold 54px monospace'; g.textBaseline = 'middle'; g.fillText('11  45  67  93', 18, 50); }) });
@@ -393,16 +413,33 @@ export class World {
         part(M.white, new THREE.BoxGeometry(long ? 0.8 : 0.4, 0.55, long ? 0.4 : 0.8), lx, fl * floorH + 0.9, lz);
       }
       // магазины на первом этаже: витрины и вывески
-      if (opts.shops) {
-        const sd = -side;
-        for (let t = -L / 2 + 3; t < L / 2 - 3; t += 6.5) {
-          const [lx, lz, ry] = long ? [t, sd * (D / 2 + 0.06), 0] : [sd * (D / 2 + 0.06), t, Math.PI / 2];
-          part(M.shopGlass, new THREE.BoxGeometry(5.4, 2.4, 0.08), lx, 1.3, lz, ry);
-          part(pick(M.signs), new THREE.BoxGeometry(5, 0.7, 0.25), lx + (long ? 0 : sd * 0.12), 3.0, lz + (long ? sd * 0.12 : 0), ry);
-        }
-      }
+      if (opts.shops) this.korzinkaFront(part, long, -side, L, D);
     }
     this.collide(x, z, w, d, rot);
+  }
+
+  // фасад магазина korzinka на первом этаже: стекло с тёплым светом, красный козырёк-короб, вывеска, вход
+  korzinkaFront(part, long, sd, L, D, SLmax = 32, sign = true) {
+    const SL = Math.min(L - 3, SLmax); if (SL < 8) return;
+    const ry = long ? (sd > 0 ? 0 : Math.PI) : (sd > 0 ? Math.PI / 2 : -Math.PI / 2);
+    const at = (t, n) => (long ? [t, sd * (D / 2 + n)] : [sd * (D / 2 + n), -t * sd]);   // t вдоль фасада, n наружу
+    const P = (m, g, t, y, n) => { const [lx, lz] = at(t, n); part(m, g, lx, y, lz, ry); };
+    P(M.kGlass, new THREE.BoxGeometry(SL, 3.1, 0.1), 0, 1.55, 0.06);                         // витрина
+    for (let t = -SL / 2; t <= SL / 2 + 0.01; t += SL / Math.max(2, Math.round(SL / 2.6))) P(M.kFrame, new THREE.BoxGeometry(0.12, 3.1, 0.16), t, 1.55, 0.1);
+    P(M.kFrame, new THREE.BoxGeometry(SL, 0.12, 0.18), 0, 3.06, 0.1);
+    P(M.kRed, new THREE.BoxGeometry(SL + 0.8, 1.8, 1.2), 0, 4.0, 0.6);                      // красный короб
+    P(M.kRed, new THREE.BoxGeometry(1.4, 3.1, 1.2), SL / 2 - 0.3, 1.55, 0.6);                // красный пилон у края
+    const sw = Math.min(SL * 0.62, 13);
+    if (sign) {
+      const g = new THREE.PlaneGeometry(sw, sw / 4 > 1.6 ? 1.6 : sw / 4); P(M.kSign, g, -SL * 0.08, 4.0, 1.215);
+      const a = g.attributes.position, nn = g.attributes.normal; (this.shops = this.shops || []).push({ x: (a.getX(0) + a.getX(3)) / 2, z: (a.getZ(0) + a.getZ(3)) / 2, nx: nn.getX(0), nz: nn.getZ(0) });
+    }
+    // вход: автоматические двери с козырьком и зелёными стрелками
+    const dt = -SL * 0.08;
+    P(M.kFrame, new THREE.BoxGeometry(3.2, 2.8, 0.25), dt, 1.4, 0.14);
+    P(M.glass, new THREE.BoxGeometry(2.8, 2.5, 0.1), dt, 1.27, 0.28);
+    P(M.kFrame, new THREE.BoxGeometry(3.6, 0.35, 0.9), dt, 2.95, 0.5);
+    for (const o of [-0.7, 0.7]) P(M.green, new THREE.CylinderGeometry(0.16, 0.16, 0.04, 16).rotateX(Math.PI / 2), dt + o, 1.3, 0.35);
   }
 
   ground() {
@@ -1554,10 +1591,12 @@ export class World {
 
   supermarket(r) {   // супермаркет и парковка
     const x = r.cx, z = r.z0 + 26;
-    this.box(M.white, x, 0, z, 62, 7, 34, 0, true);
-    this.box(M.shopGlass, x, 0.2, z + 17.05, 40, 4.6, 0.12);
-    this.box(M.green, x, 7, z, 62.4, 0.8, 34.4);
-    this.sign(x, 5.6, z + 17.2, 'SUPERMARKET', '#e2382b', 20);
+    this.box(M.kWall, x, 0, z, 62, 7, 34, 0, true);
+    this.box(M.roofDark, x, 7, z, 62.4, 0.5, 34.4);
+    const part = (m, g, lx, ly, lz, ry = 0) => { g.rotateY(ry); g.translate(x + lx, ly, z + lz); this.push(m, g); };
+    this.korzinkaFront(part, true, 1, 62, 34, 58, false);
+    this.box(M.kRed, x, 4.9, z + 17.6, 62.8, 3.2, 1.2);                                   // широкий красный пояс по верху
+    this.box(M.kSign, x - 6, 5.05, z + 18.22, 12, 3, 0.02);
     for (let k = 0; k < 14; k++) {
       const px = r.x0 + 12 + k * 3.6;
       this.quad(M.mark, px, 0.11, r.z1 - 18, 0.12, 5.5); this.quad(M.mark, px, 0.11, r.z1 - 34, 0.12, 5.5);
