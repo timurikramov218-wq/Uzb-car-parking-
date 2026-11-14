@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CARS, COLORS, CREDITS, carById, buildCarMesh, randomPlate, loadCarModels } from './cars.js';
 import { Vehicle } from './physics.js';
-import { World, HALF, VLINES, HLINES, W, SW, RING_IN, RING_OUT, CANAL_X, CANAL_W, SPAWN, LEVEL_CENTER } from './world.js';
+import { World, STRUCTS, S_FLAT, S_RAMP, S_BAND, structProfile, structUV, HALF, VLINES, HLINES, W, SW, RING_IN, RING_OUT, CANAL_X, CANAL_W, SPAWN, LEVEL_CENTER } from './world.js';
 import { LEVELS, LevelRunner } from './levels.js';
 import { Terrain } from './terrain.js';
 import { Hangar, HANGAR } from './garage.js';
@@ -173,7 +173,7 @@ function updateCamera(dt, snap = false) {
     camLook.set(player.x + hx * 20, s.hgt * 0.7 + py + Math.tan(player.tPitch || 0) * 20, player.z + hz * 20);
   } else {
     if (c.top) want.set(player.x - fx * 0.01, 34 + py, player.z - fz * 0.01);
-    else { const gy = terrain ? Math.max(terrain.heightAt(player.x - fx * c.dist, player.z - fz * c.dist) + 1.5, py + c.h) : c.h; want.set(player.x - fx * c.dist, gy, player.z - fz * c.dist); look.y = 1 + py; }
+    else { const gy = terrain ? Math.max(hAt(player.x - fx * c.dist, player.z - fz * c.dist, player.layer || 0) + 1.5, py + c.h) : c.h; want.set(player.x - fx * c.dist, gy, player.z - fz * c.dist); look.y = 1 + py; }
     const k = snap ? 1 : 1 - Math.exp(-dt * 5);
     camPos.lerp(want, k); camLook.lerp(look, k);
   }
@@ -406,6 +406,24 @@ function trafficCheck(dt) {
   lastCell = cell;
 }
 
+// ---------- Два уровня: тоннель и эстакада ----------
+const S_REACH = S_FLAT + S_RAMP;
+function structAt(x, z) {
+  for (let i = 0; i < STRUCTS.length; i++) { const S = STRUCTS[i], q = structUV(S, x, z); if (Math.abs(q.u) < 13.6 && Math.abs(q.v - S.node) < S_REACH) return { S, i, q }; }
+  return null;
+}
+function updateLayer(v) {
+  const a = structAt(v.x, v.z);
+  if (!a) { v.layer = 0; return; }
+  if (v.layer === undefined || v.layer === null) v.layer = 0;
+  if (!v._inStruct) v.layer = Math.abs(a.q.v - a.S.node) > S_REACH - 8 ? 10 + a.i : 0;   // въезд с торца — на полотно
+  v._inStruct = true;
+}
+function hAt(x, z, layer) {
+  if (layer >= 10) { const S = STRUCTS[layer - 10], q = structUV(S, x, z); if (Math.abs(q.v - S.node) < S_REACH) return structProfile(S, q.v); }
+  return terrain.heightAt(x, z);
+}
+
 // ---------- Цикл ----------
 const clock = new THREE.Clock();
 let t = 0, orbit = 0;
@@ -416,11 +434,13 @@ function frame() {
   } else if (playing()) {
     // уклон дороги: разница высот под передом и задом машины
     const hx = Math.cos(player.h), hz = -Math.sin(player.h), hl = player.spec.len / 2, hw = player.spec.wid / 2;
-    const yF = terrain.heightAt(player.x + hx * hl, player.z + hz * hl), yB = terrain.heightAt(player.x - hx * hl, player.z - hz * hl);
+    const L = player.layer || 0;
+    const yF = hAt(player.x + hx * hl, player.z + hz * hl, L), yB = hAt(player.x - hx * hl, player.z - hz * hl, L);
     player.grade = (yF - yB) / player.spec.len;
     const hit = player.update(dt, input, world.obstacles, 3600);
-    player.y = terrain.heightAt(player.x, player.z);
-    const yL = terrain.heightAt(player.x + hz * hw, player.z - hx * hw), yR = terrain.heightAt(player.x - hz * hw, player.z + hx * hw);
+    { const was = !!structAt(player.x, player.z); if (!was) player._inStruct = false; updateLayer(player); }
+    player.y = hAt(player.x, player.z, player.layer);
+    const yL = hAt(player.x + hz * hw, player.z - hx * hw, player.layer), yR = hAt(player.x - hz * hw, player.z + hx * hw, player.layer);
     const k = 1 - Math.exp(-dt * 10);
     player.tPitch = (player.tPitch || 0) + (Math.atan2(yF - yB, player.spec.len) - (player.tPitch || 0)) * k;
     player.tRoll = (player.tRoll || 0) + (Math.atan2(yL - yR, player.spec.wid) - (player.tRoll || 0)) * k;

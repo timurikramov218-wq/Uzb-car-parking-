@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { CARS, addCarToBuckets } from './cars.js';
+import { CARS, addCarToBuckets, extraModels } from './cars.js';
 import { Obstacles } from './physics.js';
 
 // ===================== Схема Ташкента (условная, сжатая) =====================
@@ -23,8 +23,17 @@ const XS = [-580, -420, -290, CANAL_X, -110, 0, 130, 270, 430, 580];
 const ZS = HLINES.map(l => l.z);
 
 export const LEVEL_CENTER = { x: 350, z: 365 };
+// Двухуровневые узлы: тоннель на пр. Амира Темура под улицей у Tashkent City и эстакада на пр. Навои
+export const STRUCTS = [
+  { axis: 'v', line: 0, node: -290, D: -6.5, name: 'Тоннель' },
+  { axis: 'h', line: 0, node: -420, D: 7.2, name: 'Эстакада' },
+];
+export const S_FLAT = 22, S_RAMP = 75, S_BAND = 12;
+export const structProfile = (S, v) => { const d = Math.abs(v - S.node); if (d <= S_FLAT) return S.D; if (d >= S_FLAT + S_RAMP) return 0; return S.D * (0.5 + 0.5 * Math.cos(Math.PI * (d - S_FLAT) / S_RAMP)); };
+// координаты вдоль/поперёк линии узла
+export const structUV = (S, x, z) => (S.axis === 'v' ? { u: x - S.line, v: z } : { u: -(z - S.line), v: x });
 // старт: проспект Амира Темура, едем на юг к скверу
-export const SPAWN = { x: -7.5, z: -200, h: -Math.PI / 2 };
+export const SPAWN = { x: -7.5, z: -175, h: -Math.PI / 2 };
 
 let seed = 7;
 const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -250,6 +259,9 @@ function makeMaterials() {
     manhole: std({ map: T.manhole, transparent: true, metalness: 0.5, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 }),
     grate: std({ map: T.grate, metalness: 0.5, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 }),
     granite: std({ map: T.granite, roughness: 0.75 }),
+    wallD: std({ color: 0xbdb8ad, roughness: 0.9, side: THREE.DoubleSide }),
+    tunnelLight: std({ color: 0xffffff, emissive: 0xfff1d0, emissiveIntensity: 1.5, side: THREE.DoubleSide }),
+    aveMarked: std({ map: (() => { const c = document.createElement('canvas'); c.width = 1024; c.height = 1024; const g = c.getContext('2d'); g.drawImage(T.ave.image, 0, 0, 1024, 1024); g.fillStyle = '#eeeee6'; g.fillRect(16, 0, 14, 1024); g.fillRect(994, 0, 14, 1024); for (const x of [341, 683]) g.fillRect(x - 6, 0, 12, 280); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t; })(), roughness: 0.9 }),
     gutter: std({ color: 0x8a8780, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1 }),
     zebra: std({ map: T.zebra, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
     sidewalk: std({ map: T.sidewalk, normalMap: normalFrom(T.sidewalk, 4) }), plaza: std({ map: T.plaza }), grass: std({ map: T.grass, roughness: 1 }),
@@ -302,7 +314,8 @@ function drawTimer(c, text, color) {
   g.fillStyle = color; g.font = 'bold 44px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, c.width / 2, c.height / 2 + 2);
 }
 function makeSignalMaterials(world) {
-  M.signalPole = new THREE.MeshStandardMaterial({ color: 0x5b6168, metalness: 0.6, roughness: 0.45 });
+  M.signalPole = new THREE.MeshStandardMaterial({ color: 0x9aa1a8, metalness: 0.75, roughness: 0.35 });
+  M.signalBorder = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.5 });
   M.sig = {}; M.timer = {}; world.timerCanvas = {}; world.timerKey = {};
   for (const grp of ['NS', 'EW']) {
     M.sig[grp] = {};
@@ -312,7 +325,7 @@ function makeSignalMaterials(world) {
     M.timer[grp] = new THREE.MeshBasicMaterial({ map: tex });
   }
 }
-const FLAT = () => [M.ave, M.st, M.asphalt, M.sidewalk, M.grass, M.dirt, M.plaza, M.lane, M.water, M.zebra, M.field, M.mark, M.yellowMark, M.arrowS, M.arrowSL, M.arrowSR, M.manhole, M.grate, M.gutter, M.aryk];
+const FLAT = () => [M.aveMarked, M.tunnelLight, M.ave, M.st, M.asphalt, M.sidewalk, M.grass, M.dirt, M.plaza, M.lane, M.water, M.zebra, M.field, M.mark, M.yellowMark, M.arrowS, M.arrowSL, M.arrowSR, M.manhole, M.grate, M.gutter, M.aryk];
 
 export class World {
   constructor(scene) {
@@ -394,7 +407,7 @@ export class World {
 
   ground() {
     const far = new THREE.Mesh(new THREE.PlaneGeometry(24000, 24000).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xa8956f, roughness: 1 }));
-    far.position.y = -3; far.receiveShadow = true; this.root.add(far);
+    far.position.y = -9; far.receiveShadow = true; this.root.add(far);
     const R = 2400;
     for (const [x, z, w, d] of [[0, -HALF - R / 2, 2 * HALF + 2 * R, R], [0, HALF + R / 2, 2 * HALF + 2 * R, R], [-HALF - R / 2, 0, R, 2 * HALF], [HALF + R / 2, 0, R, 2 * HALF]])
       this.quad(M.dirt, x, -0.25, z, w, d, 0, w / 40, d / 40);
@@ -422,8 +435,21 @@ export class World {
         }
       }
     };
-    run(VLINES, HLINES.map(h => ({ pos: h.z, t: h.t })), L => L.x, (L, c, len, za, zb) => this.segment(L.x, c, len, L.t, 'v', za, zb));
-    run(HLINES, VLINES.map(v => ({ pos: v.x, t: v.t })), L => L.z, (L, c, len, za, zb) => this.segment(c, L.z, len, L.t, 'h', za, zb));
+    const reach = S_FLAT + S_RAMP;
+    const seg = (axis, line, c, len, t, za, zb) => {
+      const S = STRUCTS.find(S => S.axis === axis && S.line === line && Math.abs(c - S.node) < len / 2 + reach);
+      if (!S) return axis === 'v' ? this.segment(line, c, len, t, 'v', za, zb) : this.segment(c, line, len, t, 'h', za, zb);
+      const v0 = c - len / 2, v1 = c + len / 2, nearA = Math.abs(v0 - S.node) < reach, nearB = Math.abs(v1 - S.node) < reach;
+      if (axis === 'v') this.segment(line, c, len, t, 'v', za && !nearA, zb && !nearB, { noCarriage: true });
+      else this.segment(c, line, len, t, 'h', za && !nearA, zb && !nearB, { noCarriage: true });
+      for (const [a, b] of [[v0, Math.min(v1, S.node - reach)], [Math.max(v0, S.node + reach), v1]]) if (b - a > 1) {
+        if (axis === 'v') this.carriage(line, (a + b) / 2, b - a, t, 'v'); else this.carriage((a + b) / 2, line, b - a, t, 'h');
+      }
+    };
+    run(VLINES, HLINES.map(h => ({ pos: h.z, t: h.t })), L => L.x, (L, c, len, za, zb) => seg('v', L.x, c, len, L.t, za, zb));
+    run(HLINES, VLINES.map(v => ({ pos: v.x, t: v.t })), L => L.z, (L, c, len, za, zb) => seg('h', L.z, c, len, L.t, za, zb));
+    for (const S of STRUCTS) this.structure(S);
+    for (const [axis, line, v] of [['h', 0, 200], ['h', 0, 500], ['v', 0, 380], ['v', 580, -330], ['h', -580, 300]]) this.footbridge(axis, line, v);
     for (const V of VLINES) for (const H of HLINES) {
       if (V.x === 0 && H.z === 0) continue;
       const wx = W[V.t], wz = W[H.t];
@@ -435,11 +461,12 @@ export class World {
   }
 
   // Отрезок дороги: проезжая часть, разметка, водостоки, бордюры, тротуары, чинары, фонари, остановки, зебры
-  segment(cx, cz, len, t, dir, zebraA = true, zebraB = true) {
+  // Проезжая часть отрезка: асфальт, разметка, водостоки, разделитель с кустами и фонарями, люки и решётки
+  carriage(cx, cz, len, t, dir) {
     if (len <= 1) return;
     const rot = dir === 'v' ? 0 : Math.PI / 2;
     const w = W[t];
-    const at = (u, v) => (dir === 'v' ? [cx + u, cz + v] : [cx + v, cz - u]);   // u — поперёк, v — вдоль
+    const at = (u, v) => (dir === 'v' ? [cx + u, cz + v] : [cx + v, cz - u]);
     const line = (u, v0, v1, width = 0.15, mat = M.mark) => { const [x, z] = at(u, (v0 + v1) / 2); this.quad(mat, x, 0.062, z, width, v1 - v0, rot); };
     const dashed = (u, from, to, dash = 3, gap = 6) => { for (let v = from; v + dash <= to; v += dash + gap) line(u, v, v + dash); };
     const v0 = -len / 2 + 1, v1 = len / 2 - 1, vd0 = -len / 2 + 9, vd1 = len / 2 - 9;
@@ -465,7 +492,6 @@ export class World {
       dashed(-3.5, vd0, vd1); dashed(3.5, vd0, vd1);
       for (const sd of [-1, 1]) { const [gx, gz] = at(sd * 6.8, 0); this.quad(M.gutter, gx, 0.058, gz, 0.4, len, rot); }
     }
-    // люки на полосах и решётки ливнёвки у бордюра
     for (let v = -len / 2 + rr(10, 30); v < len / 2 - 10; v += rr(35, 60)) {
       const u = (rnd() < 0.5 ? -1 : 1) * (t === 'ave' ? pick([3.8, 7.5, 11]) : pick([1.75, 5.25]));
       const [x, z] = at(u, v); this.geo(M.manhole, new THREE.CircleGeometry(0.4, 20).rotateX(-Math.PI / 2), x, 0.064, z);
@@ -473,9 +499,17 @@ export class World {
     for (let v = -len / 2 + 12; v < len / 2 - 8; v += 28) for (const sd of [-1, 1]) {
       const [x, z] = at(sd * (w / 2 - 0.35), v); this.quad(M.grate, x, 0.064, z, 0.5, 0.9, rot);
     }
+  }
+
+  segment(cx, cz, len, t, dir, zebraA = true, zebraB = true, opts = {}) {
+    if (len <= 1) return;
+    const rot = dir === 'v' ? 0 : Math.PI / 2;
+    const w = W[t];
+    const at = (u, v) => (dir === 'v' ? [cx + u, cz + v] : [cx + v, cz - u]);   // u — поперёк, v — вдоль
+    if (!opts.noCarriage) this.carriage(cx, cz, len, t, dir);
     // остановка: на проспектах с обеих сторон, на улицах — с одной
     const stopV = 18;
-    const stopSides = t === 'ave' ? (len > 90 ? [-1, 1] : []) : (len > 100 ? [((Math.round(cx + cz) / 10) & 1) ? 1 : -1] : []);
+    const stopSides = opts.noCarriage ? [] : t === 'ave' ? (len > 90 ? [-1, 1] : []) : (len > 100 ? [((Math.round(cx + cz) / 10) & 1) ? 1 : -1] : []);
     for (const sd of [-1, 1]) {
       const [x, z] = at(sd * (w / 2 + SW / 2), 0);
       this.quad(M.sidewalk, x, 0.1, z, SW, len, rot, SW / 3.5, len / 3.5);
@@ -499,6 +533,83 @@ export class World {
       if (!ok) continue;
       const [x, z] = at(0, sgn * (len / 2 - 3));
       this.quad(M.zebra, x, 0.068, z, w - 1, 4, rot, 1, 1);
+    }
+  }
+
+  // ---------- тоннель / эстакада ----------
+  structure(S) {
+    const reach = S_FLAT + S_RAMP, tunnel = S.D < 0, LAYER = 10 + STRUCTS.indexOf(S);
+    const P = (u, v, y) => (S.axis === 'v' ? [S.line + u, y, v] : [v, y, S.line - u]);
+    const prof = v => structProfile(S, v);
+    const range = (a, b, step = 3) => { const out = []; for (let v = a; v < b; v += step) out.push(v); out.push(b); return out; };
+    const all = range(S.node - reach, S.node + reach);
+    const outside = [range(S.node - reach, S.node - S_BAND), range(S.node + S_BAND, S.node + reach)];
+    const strip = (mat, vs, u0, u1, yf, up = true, uvs2 = 11) => {        // горизонтальная лента поперёк u0..u1
+      const pos = [], uv = [], idx = [];
+      vs.forEach((v, i) => { pos.push(...P(u0, v, yf(v)), ...P(u1, v, yf(v))); uv.push(0, (v - vs[0]) / uvs2, 1, (v - vs[0]) / uvs2); if (i) { const a = (i - 1) * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } });
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+      if ((g.attributes.normal.getY(0) > 0) !== up) { const ix = g.index.array; for (let k = 0; k < ix.length; k += 3) { const t = ix[k]; ix[k] = ix[k + 2]; ix[k + 2] = t; } g.computeVertexNormals(); }
+      this.push(mat, g);
+    };
+    const wall = (mat, vs, u, yb, yt) => {                                 // вертикальная стенка вдоль v
+      const pos = [], uv = [], idx = [];
+      vs.forEach((v, i) => { pos.push(...P(u, v, yb(v)), ...P(u, v, yt(v))); uv.push((v - vs[0]) / 4, 0, (v - vs[0]) / 4, 1); if (i) { const a = (i - 1) * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } });
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+      this.push(M.wallD, g);
+    };
+    const obb = (u, vc, halfLen, hw, layer) => { const [x, , z] = P(u, vc, 0); this.obstacles.add({ x, z, h: S.axis === 'v' ? Math.PI / 2 : 0, hl: halfLen, hw, layer }); };
+    // полотно с разметкой
+    for (const sd of [-1, 1]) strip(M.aveMarked, all, sd * 2, sd * 13, v => prof(v) + 0.05);
+    if (tunnel) {
+      for (const sd of [-1, 1]) { wall(M.wallD, all, sd * 13, v => prof(v), () => 0.3); wall(M.wallD, all, sd * 2, v => prof(v), () => 0.25); }
+      for (const vs of outside) { strip(M.grass, vs, -2, 2, () => 0.24); strip(M.concrete, vs, -2.05, -1.95, () => 0.25); }
+      // перекрытие под перекрёстком
+      const [dx, , dz] = P(0, S.node, 0);
+      this.box(M.concrete, dx, -1.2, dz, S.axis === 'v' ? 27 : S_BAND * 2 + 0.4, 1.2, S.axis === 'v' ? S_BAND * 2 + 0.4 : 27);
+      // ограждения поверху и свет в тоннеле
+      for (const vs of outside) for (const sd of [-1, 1]) {
+        wall(M.signalPole, vs, sd * 13.15, () => 0.3, () => 1.25);
+        const a = vs[0], b = vs[vs.length - 1]; obb(sd * 13.15, (a + b) / 2, (b - a) / 2, 0.3, 0);
+      }
+      for (const vs of outside) { const a = vs[0], b = vs[vs.length - 1]; obb(0, (a + b) / 2, (b - a) / 2, 2.1, 0); }
+      for (const sd of [-1, 1]) strip(M.tunnelLight, range(S.node - S_FLAT - 30, S.node + S_FLAT + 30), sd * 12.95, sd * 12.9, v => prof(v) + 4.4, true, 4);
+    } else {
+      strip(M.concrete, all, -2, 2, v => prof(v) + 0.05);
+      strip(M.concrete, all, -13.6, 13.6, v => prof(v) - 1.0, false);                // низ пролёта
+      for (const sd of [-1, 1]) wall(M.wallD, all, sd * 13.6, v => prof(v) - 1.0, v => prof(v) + 1.1);
+      wall(M.wallD, all, 0, v => prof(v), v => prof(v) + 0.9);
+      for (const sd of [-1, 1]) wall(M.wallD, all.filter(v => prof(v) < 5), sd * 13.6, () => 0, v => Math.max(0, prof(v) - 1));   // подпорные стенки насыпи
+      for (const vs of outside) strip(M.asphalt, vs, -13, 13, () => 0.04);          // земля под мостом
+      for (const v of all) if (prof(v) > 4.6 && Math.abs(v - S.node) > S_BAND + 3 && Math.round(v) % 15 < 3) for (const u of [-7.5, 7.5]) {
+        const [px, , pz] = P(u, v, 0), h = prof(v) - 1;
+        this.geo(M.concrete, new THREE.CylinderGeometry(0.9, 1.05, h, 16), px, h / 2, pz);
+        this.box(M.concrete, px, h - 0.8, pz, S.axis === 'v' ? 9 : 2.4, 0.8, S.axis === 'v' ? 2.4 : 9);
+        this.obstacles.add({ x: px, z: pz, h: 0, hl: 1.1, hw: 1.1, layer: 0 });
+      }
+      // насыпь: ниже ~4.5 м под пролётом не проехать
+      for (const sg of [-1, 1]) obb(0, S.node + sg * 68, 15, 13.6, 0);
+    }
+    // стенки и ограждения для того, кто внутри тоннеля / на эстакаде
+    for (const u of tunnel ? [-13.1, -1.9, 1.9, 13.1] : [-13.6, 0, 13.6]) obb(u, S.node, reach, 0.3, LAYER);
+    const [lx, , lz] = P(0, S.node, 0);
+    this.labels.push({ x: lx, z: lz, text: S.name });
+  }
+
+  footbridge(axis, line, v) {       // надземный пешеходный переход: лестницы на тротуарах, пролёт с ограждением и крышей
+    const t = (axis === 'v' ? VLINES.find(l => l.x === line) : HLINES.find(l => l.z === line)).t, half = W[t] / 2 + SW;
+    const P = (u, vv, y) => (axis === 'v' ? [line + u, y, vv] : [vv, y, line - u]);
+    const rot = axis === 'v' ? 0 : Math.PI / 2, H = 6;
+    const bx = (mat, u, vv, y, su, sy, sv) => { const [x, , z] = P(u, vv, 0); this.box(mat, x, y, z, axis === 'v' ? su : sv, sy, axis === 'v' ? sv : su); };
+    bx(M.concrete, 0, v, H, half * 2, 0.45, 2.6);                                   // пролёт
+    for (const sd of [-1, 1]) { bx(M.stopGlass, 0, v + sd * 1.25, H + 0.45, half * 2, 1.1, 0.06); bx(M.signalPole, 0, v + sd * 1.25, H + 1.55, half * 2, 0.08, 0.1); }
+    bx(M.stopRoof, 0, v, H + 3.1, half * 2 + 0.6, 0.15, 3.2);                        // крыша
+    for (const u of [-half + 1, -half / 2, 0, half / 2, half - 1]) for (const sd of [-1, 1]) bx(M.signalPole, u, v + sd * 1.25, H + 0.45, 0.1, 2.65, 0.1);
+    for (const sd of [-1, 1]) {                                                      // лестницы вдоль тротуара
+      const u = sd * (half - 1.3);
+      for (let k = 0; k < 20; k++) bx(M.concrete, u, v + 2 + k * 0.42, 0, 2.2, (k + 1) * (H / 20), 0.42);
+      bx(M.signalPole, u + 1.15, v + 6.2, 0, 0.08, H + 1, 8.6);
+      const [x, , z] = P(u, v + 6.2, 0); this.obstacles.add({ x, z, h: axis === 'v' ? Math.PI / 2 : 0, hl: 4.4, hw: 1.2, layer: 0 });
+      for (const k of [0, 1]) { const [px, , pz] = P(sd * (half - 0.3), v + (k ? 1.3 : -1.3), 0); this.box(M.signalPole, px, 0, pz, 0.35, H, 0.35, 0, true); }
     }
   }
 
@@ -548,26 +659,41 @@ export class World {
     const rx = -dz, rz = dx;                                   // вправо от направления движения
     const px = cx - dx * (crossHalf + 2) + rx * (laneHalf + 1.2), pz = cz - dz * (crossHalf + 2) + rz * (laneHalf + 1.2);
     const face = Math.atan2(-dx, -dz);                         // лицевая сторона смотрит на подъезжающих
-    const arm = laneHalf * 0.7;
-    this.geo(M.signalPole, new THREE.CylinderGeometry(0.11, 0.14, 6.2, 8), px, 3.1, pz);
-    const ag = new THREE.BoxGeometry(0.12, 0.12, arm); ag.translate(0, 0, arm / 2); ag.rotateY(Math.atan2(-rx, -rz));
-    ag.translate(px, 5.9, pz); this.push(M.signalPole, ag);
-    this.collide(px, pz, 0.3, 0.3);
-    const head = (hx, hy, hz, withTimer) => {
-      const add = (mat, g, lx, ly, lz) => { g.translate(lx, ly, lz); this.geo(mat, g, hx, hy, hz, face); };
-      add(M.tlBody, new THREE.BoxGeometry(0.42, 1.18, 0.3), 0, 0, 0);
-      add(M.tlBody, new THREE.BoxGeometry(0.62, 1.4, 0.04), 0, 0, -0.17);           // экран-подложка
-      [['r', 0.36], ['y', 0], ['g', -0.36]].forEach(([c, ly]) => {
-        add(M.sig[group][c], new THREE.CircleGeometry(0.13, 16), 0, ly, 0.152);
-        add(M.tlBody, new THREE.CylinderGeometry(0.16, 0.16, 0.16, 12, 1, true, -Math.PI / 2, Math.PI).rotateX(Math.PI / 2), 0, ly + 0.02, 0.22);  // козырёк
+    const arm = laneHalf * 0.85;
+    // опора: оцинкованная труба с основанием, консоль с подкосом над полосами
+    this.geo(M.signalPole, new THREE.CylinderGeometry(0.16, 0.22, 7.6, 12), px, 3.8, pz);
+    this.geo(M.signalPole, new THREE.CylinderGeometry(0.34, 0.4, 0.5, 12), px, 0.25, pz);
+    const armRot = Math.atan2(-rx, -rz);
+    const ag = new THREE.CylinderGeometry(0.1, 0.13, arm, 10); ag.rotateX(Math.PI / 2); ag.translate(0, 0, arm / 2); ag.rotateY(armRot); ag.translate(px, 7.2, pz); this.push(M.signalPole, ag);
+    const br = new THREE.CylinderGeometry(0.05, 0.05, 3.2, 6); br.rotateX(Math.PI / 2); br.translate(0, 0, 1.5); br.rotateX(-0.42); br.rotateY(armRot); br.translate(px, 6.0, pz); this.push(M.signalPole, br);
+    this.collide(px, pz, 0.45, 0.45);
+    // светофорная секция: корпус, щит со светлой каймой, линзы с козырьками
+    const head = (hx, hy, hz, withTimer, scale = 1) => {
+      const add = (mat, g, lx, ly, lz) => { g.scale(scale, scale, scale); g.translate(lx * scale, ly * scale, lz * scale); this.geo(mat, g, hx, hy, hz, face); };
+      add(M.tlBody, new THREE.BoxGeometry(0.5, 1.5, 0.36), 0, 0, 0);
+      add(M.signalBorder, new THREE.BoxGeometry(0.98, 1.98, 0.03), 0, 0, -0.2);
+      add(M.tlBody, new THREE.BoxGeometry(0.88, 1.88, 0.04), 0, 0, -0.17);
+      [['r', 0.47], ['y', 0], ['g', -0.47]].forEach(([c, ly]) => {
+        add(M.tlBody, new THREE.CylinderGeometry(0.2, 0.2, 0.04, 20).rotateX(Math.PI / 2), 0, ly, 0.19);
+        add(M.sig[group][c], new THREE.CircleGeometry(0.17, 24), 0, ly, 0.215);
+        add(M.tlBody, new THREE.CylinderGeometry(0.21, 0.21, 0.32, 16, 1, true, -Math.PI / 2 - 0.9, Math.PI + 1.8).rotateX(Math.PI / 2), 0, ly + 0.02, 0.37);   // козырёк
       });
       if (withTimer) {
-        add(M.tlBody, new THREE.BoxGeometry(0.5, 0.34, 0.12), 0, -0.88, 0.02);
-        add(M.timer[group], new THREE.PlaneGeometry(0.44, 0.28), 0, -0.88, 0.085);
+        add(M.tlBody, new THREE.BoxGeometry(0.66, 0.46, 0.14), 0, -1.08, 0.02);
+        add(M.timer[group], new THREE.PlaneGeometry(0.6, 0.4), 0, -1.08, 0.095);
       }
     };
-    head(px - rx * arm, 5.25, pz - rz * arm, false);
-    head(px + dx * 0.05, 2.9, pz + dz * 0.05, true);
+    head(px - rx * arm, 6.3, pz - rz * arm, false);              // над левыми полосами
+    head(px - rx * arm * 0.45, 6.3, pz - rz * arm * 0.45, false); // над правыми полосами
+    head(px + dx * 0.05 - rx * 0.32, 3.6, pz + dz * 0.05 - rz * 0.32, true, 0.9);
+    // пешеходный светофор и кнопка вызова на той же опоре, смотрит поперёк
+    const pf = face + Math.PI / 2;
+    const ped = (mat, g, ly, lz = 0.22) => { g.translate(0, ly, lz); this.geo(mat, g, px, 0, pz, pf); };
+    const other = M.sig[group === 'NS' ? 'EW' : 'NS'];
+    ped(M.tlBody, new THREE.BoxGeometry(0.4, 0.8, 0.22), 2.1);
+    ped(other.r, new THREE.PlaneGeometry(0.28, 0.28), 2.7, 0.335);
+    ped(other.g, new THREE.PlaneGeometry(0.28, 0.28), 2.3, 0.335);
+    ped(M.crane, new THREE.BoxGeometry(0.14, 0.22, 0.1), 1.1);
     // стоп-линия и стрелки направлений на полосах правой половины дороги
     const inner = laneHalf > 10 ? 2.2 : 0.3, outer = laneHalf - 0.4, mid = (inner + outer) / 2;
     const at = (back, u) => [cx - dx * back + rx * u, cz - dz * back + rz * u];
@@ -1271,7 +1397,19 @@ export class World {
   }
 
   tvTower(r) {      // телебашня (1985): 375 м, три конические опоры по 93 м, смотровая площадка 97 м, ресторан выше
-    const x = r.cx, z = r.cz;
+    const x = r.cx, z = r.cz, tw = extraModels.get('tashkent_tower');
+    this.tvPos = { x, z };
+    if (tw) {                       // готовая модель башни
+      const g = tw.clone(true), wrap = new THREE.Group(); wrap.add(g);
+      let b = new THREE.Box3().setFromObject(wrap); const k = 375 / (b.max.y - b.min.y); g.scale.setScalar(k);
+      b = new THREE.Box3().setFromObject(wrap); const c = b.getCenter(new THREE.Vector3());
+      g.position.set(-c.x, -b.min.y, -c.z); wrap.position.set(x, 0, z);
+      wrap.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (o.material) o.material.side = THREE.FrontSide; } });
+      this.root.add(wrap); wrap.updateMatrixWorld(true);
+      b = new THREE.Box3().setFromObject(wrap);
+      const foot = Math.max(b.max.x - x, b.max.z - z) * 0.75;
+      for (let k2 = 0; k2 < 3; k2++) { const a = (k2 / 3) * Math.PI * 2 + 0.3; this.collide(x + Math.cos(a) * foot, z + Math.sin(a) * foot, 12, 12); }
+    } else {
     for (let k = 0; k < 3; k++) {
       const a = (k / 3) * Math.PI * 2 + 0.3, R0 = 34;
       const bx = x + Math.cos(a) * R0, bz = z + Math.sin(a) * R0;
@@ -1293,7 +1431,8 @@ export class World {
     this.geo(M.steel, new THREE.CylinderGeometry(5.5, 5.5, 3, 24), x, 180, z);                            // техническая площадка
     this.geo(M.steel, new THREE.CylinderGeometry(0.6, 2.2, 135, 10), x, 240 + 67.5, z);                   // антенна до 375 м
     for (const y of [260, 300, 340, 372]) this.geo(M.red, new THREE.SphereGeometry(0.9, 8, 6), x, y, z);  // заградительные огни
-    this.box(M.concrete, x, 0, z, 16, 8, 16, 0, true);
+    }
+    if (tw) this.collide(x, z, 16, 16); else this.box(M.concrete, x, 0, z, 16, 8, 16, 0, true);
     this.labels.push({ x, z, text: 'Телебашня' });
     for (let k = 0; k < 40; k++) { const a = rnd() * 7, d = rr(44, 56); this.trees.push({ x: x + Math.cos(a) * d, z: z + Math.sin(a) * d, s: rr(0.9, 1.3), kind: 'poplar' }); }
   }

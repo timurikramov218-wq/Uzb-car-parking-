@@ -10,5 +10,6 @@
 | `matiz.glb` | Daewoo Matiz | Serial Designation N-0X0010010 | https://sketchfab.com/3d-models/daewoo-matiz-61be0476f0d64a9d8b37e4cdbc430fff |
 | `nexia.glb` | Daewoo Nexia (Model DN) | Villanueva-Jonatan-32621 | https://sketchfab.com/3d-models/daewoo-nexia-model-dn-motor-depot-d55e4bc4ecba44e8a5040de5ca10d2ca |
 | `malibu.glb` | 2016 Chevrolet Malibu 2.0 T Premier | Ddiaz Design | https://sketchfab.com/3d-models/2016-chevrolet-malibu-20-t-premier-fc07e847ec6c4dbaa02d53e1110a6dd7 |
+| `tashkent_tower.glb` | Tashkent Tower (телебашня) | nuraliblender | https://sketchfab.com/3d-models/tashkent-tower-a051583eb722450fa198d79c54a28521 |
 
 Файлы `*_lod.glb` — облегчённые версии тех же моделей для машин, припаркованных на улицах.

@@ -33,6 +33,7 @@ export class Terrain {
     this.buildPath();
     this.buildHeights();
     this.buildMesh();
+    this.ready = true;
     this.buildRoad();
     this.buildLake();
     this.amirsoy();
@@ -62,6 +63,10 @@ export class Terrain {
       if (s < sAmir) return 70 + 105 * sstep(sLake1, sAmir, s);
       return 175 + 65 * sstep(sAmir, len, s);
     };
+    // лёгкие волны дороги — только на двух коротких участках (в предгорьях и после Чарвака)
+    const base = this.roadH, w1 = sLake0 * 0.55, w2 = sLake1 + 120;
+    const wave = (s0, s, len2) => (s > s0 && s < s0 + len2 ? Math.sin(((s - s0) / len2) * Math.PI) * 0.9 * Math.sin((s - s0) / 22) : 0);
+    this.roadH = s => base(s) + wave(w1, s, 260) + wave(w2, s, 200);
     for (const p of this.path) p.y = this.roadH(p.s);
     // хеш точек пути для быстрых запросов расстояния
     this.bucket = new Map();
@@ -140,8 +145,19 @@ export class Terrain {
     return { a: { x: e.x + 40, z: e.z - 30 }, b: best };
   }
 
+  // Высота полотна дороги в точке (гладко, без ступенек сетки)
+  roadSurface(x, z) {
+    const np = this.nearPath(x, z, 14);
+    if (!np || np.d > 9.6) return null;
+    const p = np.p, i = Math.round(p.s / (this.pathLen / (this.path.length - 1)));
+    const q = this.path[Math.min(this.path.length - 1, i + 1)], q0 = this.path[Math.max(0, i - 1)];
+    const ds = q.s - q0.s || 1, slope = (q.y - q0.y) / ds;
+    return p.y + ((x - p.x) * p.tx + (z - p.z) * p.tz) * slope;
+  }
+
   heightAt(x, z) {
     if (x < X0 || x > X1 || z < Z0 || z > Z1) return 0;
+    if (this.ready) { const r = this.roadSurface(x, z); if (r !== null) return Math.max(0, r); }
     const fx = (x - X0) / STEP, fz = (z - Z0) / STEP;
     const i = Math.min(GN - 2, Math.floor(fx)), j = Math.min(GN - 2, Math.floor(fz)), u = fx - i, v = fz - j;
     const H = this.H, a = H[j * GN + i], b = H[j * GN + i + 1], c = H[(j + 1) * GN + i], d = H[(j + 1) * GN + i + 1];
@@ -194,7 +210,7 @@ export class Terrain {
       const nx = -p.tz, nz = p.tx;
       for (const sd of [-1, 1]) {
         const x = p.x + nx * sd * W / 2, z = p.z + nz * sd * W / 2;
-        pos.push(x, this.heightAt(x, z) + 0.12, z); uv.push(sd < 0 ? 0 : 1, p.s / 18);
+        pos.push(x, p.y + 0.1, z); uv.push(sd < 0 ? 0 : 1, p.s / 18);
       }
       if (i > 0) { const a = (i - 1) * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
     });
@@ -242,7 +258,7 @@ export class Terrain {
     const wood = new THREE.MeshStandardMaterial({ color: 0x7a5233, roughness: 0.85 });
     const darkWood = new THREE.MeshStandardMaterial({ color: 0x4a3221, roughness: 0.85 });
     const stone = new THREE.MeshStandardMaterial({ color: 0x9a9286, roughness: 0.95 });
-    const roofM = new THREE.MeshStandardMaterial({ color: 0x2c2f33, metalness: 0.4, roughness: 0.5 });
+    const roofM = new THREE.MeshStandardMaterial({ color: 0x5a4a3e, metalness: 0.15, roughness: 0.7 });
     const glass = new THREE.MeshStandardMaterial({ color: 0x1d2b36, metalness: 0.6, roughness: 0.1 });
     const steel = new THREE.MeshStandardMaterial({ color: 0x8e959d, metalness: 0.7, roughness: 0.4 });
     const parts = new Map(); const add = (m, g) => { if (!parts.has(m)) parts.set(m, []); parts.get(m).push(g); };
@@ -256,25 +272,70 @@ export class Terrain {
       const gl = new THREE.PlaneGeometry(w * 0.7, h * 0.6); gl.translate(0, h * 0.5, d / 2 + 0.02); gl.rotateY(rot); gl.translate(x, y, z); add2(glass, gl);
       this.obstacles.add({ x, z, h: rot, hl: w / 2 + 0.3, hw: d / 2 + 0.3 });
     };
-    // главный лодж у конца дороги
     const ang = Math.atan2(-e.tz, e.tx);
     const fx = e.tx, fz = e.tz, lx = -fz, lz = fx;
-    gable(e.x + fx * 70 + lx * 25, e.z + fz * 70 + lz * 25, 38, 18, 9, 7, ang, wood);
-    gable(e.x + fx * 70 - lx * 22, e.z + fz * 70 - lz * 22, 22, 14, 7, 5, ang, darkWood);
-    // шале вокруг площадки
-    for (let k = 0; k < 16; k++) {
-      const a = -1.2 + k * 0.17, r = 140 + (k % 3) * 22;
-      const x = e.x + Math.cos(a + ang) * r, z = e.z - Math.sin(a + ang) * r;
-      const np = this.nearPath(x, z, 30); if (np && np.d < 18) continue;          // дорога идёт дальше к Бельдерсаю
-      gable(x, z, 7, 6, 4.2, 4.5, ang + a, k % 2 ? wood : darkWood);
+    const chalet = this.chalet = (x, z, rot, s = 1, big = false) => {   // А-образное шале
+      const y = this.heightAt(x, z) - 0.2, W2 = (big ? 16 : 9) * s, D2 = (big ? 22 : 11) * s, RH = (big ? 13 : 9) * s;
+      const P = (g) => { g.rotateY(rot); g.translate(x, y, z); return g; };
+      add(stone, P(new THREE.BoxGeometry(W2 + 1, 1.6, D2 + 1).translate(0, 0.4, 0)));                       // каменный цоколь
+      const tri = new THREE.Shape(); tri.moveTo(-W2 / 2 - 0.6, 0); tri.lineTo(0, RH); tri.lineTo(W2 / 2 + 0.6, 0); tri.closePath();
+      add(roofM, P(new THREE.ExtrudeGeometry(tri, { depth: D2 + 0.8, bevelEnabled: false }).translate(0, 1.2, -D2 / 2 - 0.4)));   // крыша почти до земли
+      const inner = new THREE.Shape(); inner.moveTo(-W2 / 2 + 0.4, 0); inner.lineTo(0, RH - 1.1); inner.lineTo(W2 / 2 - 0.4, 0); inner.closePath();
+      add(glass, P(new THREE.ShapeGeometry(inner).translate(0, 1.25, D2 / 2 + 0.42)));                       // остеклённый фронтон
+      add(wood, P(new THREE.ShapeGeometry(inner).scale(1.08, 1.06, 1).translate(0, 1.2, D2 / 2 + 0.41)));    // деревянная рамка
+      for (const xx of [-W2 * 0.18, W2 * 0.18]) add(darkWood, P(new THREE.BoxGeometry(0.16, RH * 0.6, 0.1).translate(xx, 1.2 + RH * 0.27, D2 / 2 + 0.46)));
+      add(darkWood, P(new THREE.BoxGeometry(W2 * 0.75, 0.14, 0.1).translate(0, 1.2 + RH * 0.38, D2 / 2 + 0.46)));
+      add(wood, P(new THREE.BoxGeometry(W2 + 0.4, 0.25, 3).translate(0, 1.05, D2 / 2 + 1.9)));              // терраса
+      add(darkWood, P(new THREE.BoxGeometry(W2 + 0.4, 0.9, 0.08).translate(0, 1.6, D2 / 2 + 3.35)));
+      add(stone, P(new THREE.BoxGeometry(0.9, 2.6, 0.9).translate(W2 * 0.22, RH * 0.75 + 0.6, -D2 * 0.2)));  // труба
+      this.obstacles.add({ x, z, h: rot, hl: W2 / 2 + 0.7, hw: D2 / 2 + 1.6 });
+    };
+    // главный лодж и ресторан
+    for (const [sd, sc] of [[1, 1], [-1, 0.8]]) {          // отодвигаем от дороги, пока не встанет свободно
+      let off = 34, x, z;
+      for (let i = 0; i < 12; i++) { x = e.x + fx * 75 + lx * off * sd; z = e.z + fz * 75 + lz * off * sd; const np = this.nearPath(x, z, 60); if (!np || np.d > 26 * sc) break; off += 6; }
+      chalet(x, z, ang + sd * Math.PI / 2, sc, true);
     }
-    // парковка
-    const pk = new THREE.PlaneGeometry(60, 34); pk.rotateX(-Math.PI / 2); pk.rotateY(ang); pk.translate(e.x + fx * 25 - lx * 30, y0 + 0.1, e.z + fz * 25 - lz * 30);
-    add(new THREE.MeshStandardMaterial({ color: 0x45474b, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1 }), pk);
+    // шале террасами по склонам вокруг площадки
+    let placed = 0;
+    for (let ring = 0; ring < 3; ring++) for (let k = 0; k < 14; k++) {
+      const a = -1.5 + k * 0.23 + ring * 0.11, r = 120 + ring * 34;
+      const x = e.x + Math.cos(a + ang) * r, z = e.z - Math.sin(a + ang) * r;
+      const np = this.nearPath(x, z, 40); if (np && np.d < 26) continue;
+      const L0 = this.lifts[0]; if (Math.abs((x - L0.a.x) * (L0.b.z - L0.a.z) - (z - L0.a.z) * (L0.b.x - L0.a.x)) / Math.hypot(L0.b.x - L0.a.x, L0.b.z - L0.a.z) < 30) continue;
+      chalet(x, z, Math.atan2(e.x - x, e.z - z), 0.9 + (k % 3) * 0.1); placed++;
+    }
+    // въезд: две опоры в камне, балка с названием, КПП и поднятый шлагбаум
+    const gi = Math.max(0, Math.round((e.s - 150) / (this.pathLen / (this.path.length - 1))));
+    const gp = this.path[gi], gy = gp.y, gr = Math.atan2(-gp.tz, gp.tx) + Math.PI / 2, gnx = -gp.tz, gnz = gp.tx;
+    for (const sd of [-1, 1]) {
+      const px = gp.x + gnx * sd * 11, pz = gp.z + gnz * sd * 11;
+      add(stone, new THREE.BoxGeometry(2.4, 9, 2.4).translate(px, gy + 4.5, pz));
+      add(darkWood, new THREE.BoxGeometry(2.8, 0.6, 2.8).translate(px, gy + 9.2, pz));
+      this.obstacles.add({ x: px, z: pz, h: 0, hl: 1.3, hw: 1.3 });
+    }
+    const beam = new THREE.BoxGeometry(25, 1.6, 1.2); beam.rotateY(gr); beam.translate(gp.x, gy + 10, gp.z); add(darkWood, beam);
+    const roofBeam = new THREE.BoxGeometry(27, 0.5, 3.4); roofBeam.rotateY(gr); roofBeam.translate(gp.x, gy + 11, gp.z); add(roofM, roofBeam);
+    const bx = gp.x + gnx * 14, bz = gp.z + gnz * 14;
+    add(wood, new THREE.BoxGeometry(3, 2.8, 3).translate(bx, gy + 1.4, bz)); add(roofM, new THREE.BoxGeometry(3.8, 0.3, 3.8).translate(bx, gy + 2.95, bz));
+    add(glass, new THREE.BoxGeometry(3.05, 1, 2.2).translate(bx, gy + 1.8, bz));
+    this.obstacles.add({ x: bx, z: bz, h: 0, hl: 1.6, hw: 1.6 });
+    const boom = new THREE.BoxGeometry(0.15, 7, 0.15); boom.translate(0, 3.5, 0); boom.rotateZ(-0.15); boom.rotateY(gr); boom.translate(gp.x + gnx * 9.4, gy + 1, gp.z + gnz * 9.4); add(new THREE.MeshStandardMaterial({ color: 0xd8262f }), boom);
+    for (const sd of [-1, 1]) for (let k = 0; k < 3; k++) {   // флаги
+      const fx2 = gp.x + gnx * sd * (15 + k * 2.5) - gp.tx * 4, fz2 = gp.z + gnz * sd * (15 + k * 2.5) - gp.tz * 4;
+      add(steel, new THREE.CylinderGeometry(0.06, 0.06, 7, 6).translate(fx2, gy + 3.5, fz2));
+      add(new THREE.MeshStandardMaterial({ color: [0x1f56a8, 0xffffff, 0x2e8a4e][k], side: THREE.DoubleSide }), new THREE.PlaneGeometry(1.6, 1).translate(0.8, 0, 0).rotateY(gr).translate(fx2, gy + 6.3, fz2));
+    }
+    this.gateSign = { x: gp.x, z: gp.z, y: gy + 10, rot: gr };
+    // фонари вдоль площадки
+    for (let k = 0; k < 10; k++) { const a = -1.2 + k * 0.27, x = e.x + Math.cos(a + ang) * 95, z = e.z - Math.sin(a + ang) * 95; const yy = this.heightAt(x, z); add(darkWood, new THREE.CylinderGeometry(0.08, 0.1, 3.4, 6).translate(x, yy + 1.7, z)); add(new THREE.MeshStandardMaterial({ color: 0xfff3cf, emissive: 0xffd27a, emissiveIntensity: 0.6 }), new THREE.BoxGeometry(0.35, 0.45, 0.35).translate(x, yy + 3.5, z)); }
     this.buildLift(this.lifts[0], 'gondola', add, steel, roofM);
     this.gable = gable; this.resMats = { wood, darkWood, stone, roofM, glass, steel };
     for (const [m, list] of parts) { const mesh = new THREE.Mesh(mergeGeometries(list.map(g => g.index ? g.toNonIndexed() : g)), m); mesh.castShadow = mesh.receiveShadow = true; this.root.add(mesh); }
-    this.sign(e.x + fx * 40 + lx * 12, e.z + fz * 40 + lz * 12, 'AMIRSOY', '#7a5233', ang + Math.PI / 2, 4);
+    const G = this.gateSign, cv = document.createElement('canvas'); cv.width = 1024; cv.height = 128; const g2 = cv.getContext('2d');
+    g2.fillStyle = '#3a2618'; g2.fillRect(0, 0, 1024, 128); g2.fillStyle = '#f3e3c3'; g2.font = '700 92px Georgia, serif'; g2.textAlign = 'center'; g2.textBaseline = 'middle'; g2.fillText('A M I R S O Y', 512, 70);
+    const st2 = new THREE.CanvasTexture(cv); st2.colorSpace = THREE.SRGBColorSpace;
+    for (const sd of [-1, 1]) { const m2 = new THREE.Mesh(new THREE.PlaneGeometry(20, 2.5), new THREE.MeshStandardMaterial({ map: st2 })); m2.position.set(G.x, G.y, G.z); m2.rotation.y = G.rot + (sd > 0 ? 0 : Math.PI); m2.translateZ(0.62); this.root.add(m2); }
   }
 
   // Канатная дорога: станции, опоры, канаты; 'gondola' — кабины, 'chair' — двухместные кресла

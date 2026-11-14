@@ -72,7 +72,7 @@ export class Vehicle {
   }
   reset(x, z, h) {
     this.x = x; this.z = z; this.h = h;
-    this.vx = 0; this.vz = 0; this.r = 0;
+    this.vx = 0; this.vz = 0; this.r = 0; this.layer = 0; this._inStruct = false;
     this.speed = 0; this.lat = 0; this.steer = 0; this.braking = false; this.wheelRot = 0;
     this.roll = 0; this.pitch = 0; this.prevU = 0; this.skid = 0; this.y = 0; this.tPitch = 0; this.tRoll = 0; this.grade = 0;
   }
@@ -97,8 +97,8 @@ export class Vehicle {
 
     // руль: плавно к цели, быстрее возвращается в ноль; на скорости угол меньше
     const steerIn = (inp.left ? 1 : 0) - (inp.right ? 1 : 0);
-    const maxSteer = 0.52 / (1 + (u * u) / 140);
-    const rate = (steerIn === 0 ? 2.2 : 1.1) * dt;
+    const maxSteer = 0.64 / (1 + (u * u) / 220);
+    const rate = (steerIn === 0 ? 2.8 : 1.7) * dt;
     this.steer += clamp(steerIn * maxSteer - this.steer, -rate, rate);
 
     // продольные силы
@@ -135,7 +135,7 @@ export class Vehicle {
     this.r = rKin + (rDyn - rKin) * dyn;
     if (dyn > 0) {
       // угловая скорость не больше, чем позволяет сцепление (иначе машину «разворачивает» на любом повороте)
-      const rMax = (9.81 * 1.05 / Math.max(Math.abs(u), 1)) * (inp.brake ? 1.9 : 1.08);
+      const rMax = (9.81 * 1.1 / Math.max(Math.abs(u), 1)) * (inp.brake ? 1.9 : 1.2);
       const rc = clamp(this.r, -rMax, rMax);
       this.r += (rc - this.r) * dyn;
       if (!inp.brake) wDyn *= 1 - dt * 1.5;                 // шины гасят боковое скольжение
@@ -167,7 +167,7 @@ export class Vehicle {
     };
     for (let iter = 0; iter < 3; iter++) {
       let any = false;
-      for (const o of obstacles.query(this.x, this.z, this.hl + 2)) { const m = satOBB(this, o); if (m) { any = true; respond(m, false); } }
+      for (const o of obstacles.query(this.x, this.z, this.hl + 2)) { if ((o.layer || 0) !== (this.layer || 0)) continue; const m = satOBB(this, o); if (m) { any = true; respond(m, false); } }
       if (this.extra) for (const o of this.extra) { const m = satOBB(this, o); if (m) { any = true; respond(m, true); } }
       if (!any) break;
     }

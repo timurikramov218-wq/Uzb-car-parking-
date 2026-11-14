@@ -4,13 +4,13 @@ import * as THREE from 'three';
 // model: сжатая glb-модель; paint: имя материала краски; rotY: поворот, чтобы перёд смотрел по +X.
 export const CARS = [
   { id: 'matiz', name: 'Matiz', type: 'hatch', len: 3.50, wid: 1.50, hgt: 1.50, price: 0,    maxSpeed: 36, accel: 7.5,
-    model: 'models/matiz.glb', lod: 'models/matiz_lod.glb', paint: 'material_1', rotY: Math.PI / 2, desc: 'Маленький и юркий', parked: 3 },
+    model: 'models/matiz.glb', lod: 'models/matiz_lod.glb', wheels: { f: 1.10, r: -1.26, y: 0.278, R: 0.265, z: 0.64, w: 0.22 }, paint: 'material_1', rotY: Math.PI / 2, desc: 'Маленький и юркий', parked: 3 },
   { id: 'damas', name: 'Damas', type: 'van',   len: 3.48, wid: 1.40, hgt: 1.90, price: 0, maxSpeed: 30, accel: 6.0,
-    model: 'models/damas.glb', paint: 'material_3', rotY: Math.PI, desc: 'Легенда ташкентских маршруток', parked: 1 },
+    model: 'models/damas.glb', wheels: { f: 0.81, r: -1.05, y: 0.282, R: 0.275, z: 0.61, w: 0.18 }, paint: 'material_3', rotY: Math.PI, desc: 'Легенда ташкентских маршруток', parked: 1 },
   { id: 'nexia', name: 'Nexia', type: 'sedan', len: 4.48, wid: 1.66, hgt: 1.42, price: 0, maxSpeed: 46, accel: 9.0,
-    model: 'models/nexia.glb', lod: 'models/nexia_lod.glb', paint: 'paint', rotY: Math.PI / 2, desc: 'Народный седан', parked: 3 },
+    model: 'models/nexia.glb', lod: 'models/nexia_lod.glb', wheels: { f: 1.30, r: -1.21, y: 0.30, R: 0.30, z: 0.715, w: 0.2 }, plateFront: { x: 2.21, y: 0.478 }, paint: 'paint', rotY: Math.PI / 2, desc: 'Народный седан', parked: 3 },
   { id: 'malibu', name: 'Malibu', type: 'sedan', len: 4.92, wid: 1.85, hgt: 1.47, price: 0, maxSpeed: 62, accel: 12.5,
-    model: 'models/malibu.glb', lod: 'models/malibu_lod.glb', paint: 'int_mat', rotY: Math.PI / 2, desc: 'Бизнес-класс', parked: 1 },
+    model: 'models/malibu.glb', lod: 'models/malibu_lod.glb', wheels: { f: 1.44, r: -1.37, y: 0.36, R: 0.355, z: 0.795, w: 0.25 }, paint: 'int_mat', rotY: Math.PI / 2, desc: 'Бизнес-класс', parked: 1 },
 ];
 
 export const CREDITS = [
@@ -18,6 +18,7 @@ export const CREDITS = [
   'Daewoo Matiz — Serial Designation N-0X0010010 (Sketchfab), CC BY 4.0',
   'Daewoo Nexia — Villanueva-Jonatan-32621 (Sketchfab), CC BY 4.0',
   'Chevrolet Malibu — Ddiaz Design (Sketchfab), CC BY 4.0',
+  'Tashkent Tower — nuraliblender (Sketchfab), CC BY 4.0',
 ];
 
 // Белый первым: все машины с завода белые
@@ -256,6 +257,7 @@ function buildProcCar(spec, colorHex, plate = randomPlate()) {
 
 // ---------- Настоящие 3D-модели ----------
 const templates = new Map(), lodTemplates = new Map();
+export const extraModels = new Map();       // не машины: телебашня и т.п.
 
 export async function loadCarModels() {
   let GLTFLoader, MeshoptDecoder;
@@ -269,17 +271,20 @@ export async function loadCarModels() {
     const b64 = window.__MODEL_DATA && window.__MODEL_DATA[id];
     return b64 ? loader.parseAsync(Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer, '') : loader.loadAsync(url);
   };
-  await Promise.all(CARS.map(async spec => {
-    try { templates.set(spec.id, prepareTemplate(spec, (await load(spec.id, spec.model)).scene)); }
+  const extras = [['tashkent_tower', 'models/tashkent_tower.glb']].map(async ([id, url]) => {
+    try { extraModels.set(id, (await load(id, url)).scene); } catch (e) { console.warn('Нет модели', url, e); }
+  });
+  await Promise.all([...extras, ...CARS.map(async spec => {
+    try { templates.set(spec.id, prepareTemplate(spec, (await load(spec.id, spec.model)).scene, true)); }
     catch (e) { console.warn('Не удалось загрузить', spec.model, e); }
     if (spec.lod) {
       try { const keepH = spec.hgt; lodTemplates.set(spec.id, prepareTemplate(spec, (await load(spec.id + '_lod', spec.lod)).scene)); spec.hgt = keepH; }
       catch (e) { console.warn('Нет облегчённой модели', spec.lod); }
     }
-  }));
+  })]);
 }
 
-function prepareTemplate(spec, scene) {
+function prepareTemplate(spec, scene, full = false) {
   const inner = new THREE.Group(); inner.add(scene); inner.rotation.y = spec.rotY;
   const body = new THREE.Group(); body.add(inner); body.userData.body = true;   // кузов отдельно — для крена и клевка
   const wrap = new THREE.Group(); wrap.add(body);
@@ -305,33 +310,64 @@ function prepareTemplate(spec, scene) {
     if (o.material.transparent) o.castShadow = false;
   });
 
-  // Поиск колёс: низкие, круглые сбоку, узкие детали
-  const parts = new Map();
-  const tmp = new THREE.Box3(), cc = new THREE.Vector3(), ss = new THREE.Vector3();
-  const meshes = []; wrap.traverse(o => o.isMesh && meshes.push(o));
-  for (const m of meshes) {
-    tmp.setFromObject(m); tmp.getCenter(cc); tmp.getSize(ss);
-    const round = ss.y > 0.3 && ss.y < 0.85 && Math.abs(ss.x - ss.y) < ss.y * 0.25;
-    if (!round || cc.y > s2.y * 0.3 || Math.abs(cc.x) < spec.len * 0.15) continue;
-    const axle = ss.z > spec.wid * 0.5;          // колёса оси слиты в одну деталь
-    const key = `${Math.sign(cc.x)}${axle ? 'A' : Math.sign(cc.z)}`;
-    if (!parts.has(key)) parts.set(key, { meshes: [], box: new THREE.Box3() });
-    const p = parts.get(key); p.meshes.push(m); p.box.union(tmp);
+  // Колёса: вырезаем из всех деталей треугольники внутри цилиндра каждого колеса и вешаем на свой узел вращения.
+  // Так крутятся только колёса — без кусков кузова, даже если в модели они слиты в одну деталь.
+  if (full && spec.wheels) splitWheels(spec.wheels, wrap);
+  // номер вместо чужого (у Nexia был российский)
+  if (spec.plateFront) {
+    const pm = new THREE.MeshStandardMaterial({ map: plateTexture('01A 777 AA'), roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -2 });
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(0.52, 0.115), pm); pl.rotation.y = Math.PI / 2; pl.position.set(spec.plateFront.x, spec.plateFront.y, 0); wrap.add(pl);
   }
   const wheels = [];
-  const axles = [...parts.keys()].filter(k => k.endsWith('A')).length;
-  if (parts.size === 4 || (axles === 2 && parts.size === 2)) {
-    for (const [key, p] of parts) {
-      const pivot = new THREE.Group(); p.box.getCenter(pivot.position);
-      wrap.add(pivot); wrap.updateMatrixWorld(true);
-      for (const m of p.meshes) pivot.attach(m);
-      pivot.userData.wheel = { front: key[0] !== '-' && !key.endsWith('A') };
-    }
-  }
   return { wrap, wheels };
 }
 
 const paintCache = new Map();
+function splitWheels(W, wrap) {
+  const centers = [];
+  for (const x of [W.f, W.r]) for (const sd of [-1, 1]) centers.push({ x, z: sd * W.z, front: x === W.f });
+  const pivots = centers.map(c => { const p = new THREE.Group(); p.position.set(c.x, W.y, c.z); p.userData.wheel = { front: c.front }; return p; });
+  wrap.updateMatrixWorld(true);
+  const meshes = []; wrap.traverse(o => o.isMesh && meshes.push(o));
+  const v = new THREE.Vector3(), pts = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  for (const m of meshes) {
+    const g0 = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry;
+    const pos = g0.attributes.position, n = pos.count / 3, mw = m.matrixWorld;
+    const assign = new Int8Array(n).fill(-1); let any = false;
+    for (let t = 0; t < n; t++) {
+      for (let k = 0; k < 3; k++) pts[k].fromBufferAttribute(pos, t * 3 + k).applyMatrix4(mw);
+      v.copy(pts[0]).add(pts[1]).add(pts[2]).multiplyScalar(1 / 3);
+      for (let i = 0; i < 4; i++) {
+        const c = centers[i];
+        if (Math.abs(v.z - c.z) > W.w / 2 + 0.08 || Math.hypot(v.x - c.x, v.y - W.y) > W.R * 1.03) continue;
+        if (pts.every(p => Math.hypot(p.x - c.x, p.y - W.y) < W.R * 1.1 && Math.abs(p.z - c.z) < W.w / 2 + 0.12)) { assign[t] = i; any = true; break; }
+      }
+    }
+    if (!any) continue;
+    const names = Object.keys(g0.attributes);
+    const build = keep => {
+      let cnt = 0; for (let t = 0; t < n; t++) if (keep(assign[t])) cnt++;
+      if (!cnt) return null;
+      const g = new THREE.BufferGeometry();
+      for (const nm of names) {
+        const a = g0.attributes[nm], is = a.itemSize, arr = new Float32Array(cnt * 3 * is); let o = 0;
+        for (let t = 0; t < n; t++) { if (!keep(assign[t])) continue; for (let k = 0; k < 3; k++) for (let j = 0; j < is; j++) arr[o++] = a.getComponent(t * 3 + k, j); }
+        g.setAttribute(nm, new THREE.BufferAttribute(arr, is));
+      }
+      return g;
+    };
+    for (let i = 0; i < 4; i++) {
+      const wg = build(a => a === i); if (!wg) continue;
+      wg.applyMatrix4(mw); wg.translate(-centers[i].x, -W.y, -centers[i].z);
+      const wm = new THREE.Mesh(wg, m.material); wm.castShadow = true; wm.userData.paint = m.userData.paint;
+      pivots[i].add(wm);
+    }
+    const rest = build(a => a < 0);
+    if (rest) m.geometry = rest; else m.visible = false;
+  }
+  for (const p of pivots) if (p.children.length) wrap.add(p);
+}
+
 function paintMaterial(base, hex) {
   const key = base.uuid + hex;
   if (!paintCache.has(key)) {
