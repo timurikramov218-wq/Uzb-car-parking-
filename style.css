@@ -240,3 +240,4 @@ h2 { font: 300 26px/1.1 var(--font); letter-spacing: 0.02em; margin: 0; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 @media (max-width: 720px) { .topbar .wordmark { display: none; } .gname small { display: none; } }
+#game { touch-action: none; }

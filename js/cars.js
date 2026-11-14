@@ -24,17 +24,26 @@ export const CREDITS = [
   'Modern House — Desant_Art (Sketchfab), CC BY 4.0',
   'Soviet Panel House — mrsanya333 (Sketchfab), CC BY 4.0',
   'Asian Themed Low Poly Night City Buildings — 99.Miles (Sketchfab), CC BY 4.0',
+  'Residential Complex Modern Apartment Building — saeedakbari (Sketchfab), Sketchfab Standard',
+  'Polish modern housing estate (lite) — Shotkey (Sketchfab), CC BY 4.0',
+  'Barbershop, Coffee Shop, Car Service, Car Wash — Vladyslav Holhanov (Sketchfab), CC BY 4.0',
+  'Engadine McDonalds Restaurant (low Poly) — Jotrain Models (Sketchfab), Sketchfab Standard',
+  'Business City Building, 3D House — KarltheDesigner (Sketchfab), CC BY 4.0',
 ];
 
 // Белый первым: все машины с завода белые
+// Заводские автомобильные цвета: значения подобраны под реальные эмали (без «кислотных» оттенков)
 export const COLORS = [
-  { name: 'Белый',          hex: '#f4f4f2' },
-  { name: 'Серебро',        hex: '#b9bdc3' },
-  { name: 'Мокрый асфальт', hex: '#50555c' },
-  { name: 'Чёрный',         hex: '#16171a' },
-  { name: 'Вишня',          hex: '#5e1020' },
-  { name: 'Синий',          hex: '#1f3f8f' },
-  { name: 'Бежевый',        hex: '#cbb894' },
+  { name: 'Белый',          hex: '#eeeeea' },
+  { name: 'Жемчуг',         hex: '#e6e1d6', metal: 0.35 },
+  { name: 'Серебро',        hex: '#a9adb2', metal: 0.75 },
+  { name: 'Графит',         hex: '#4b4f55', metal: 0.6 },
+  { name: 'Чёрный',         hex: '#0d0e10' },
+  { name: 'Тёмно-синий',    hex: '#1a2c4e', metal: 0.5 },
+  { name: 'Бордо',          hex: '#5a1219', metal: 0.45 },
+  { name: 'Тёмно-зелёный',  hex: '#1f3a2e', metal: 0.4 },
+  { name: 'Бежевый',        hex: '#b9a888', metal: 0.3 },
+  { name: 'Красный',        hex: '#a3141c' },
 ];
 
 export const carById = id => CARS.find(c => c.id === id) || CARS[0];
@@ -276,7 +285,7 @@ export async function loadCarModels() {
     const b64 = window.__MODEL_DATA && window.__MODEL_DATA[id];
     return b64 ? loader.parseAsync(Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer, '') : loader.loadAsync(url);
   };
-  const extras = [['tashkent_tower', 'models/tashkent_tower.glb'], ['gas_shell', 'models/city/gas_shell.glb'], ['park_square', 'models/city/park_square.glb'], ['modern_house', 'models/city/modern_house.glb'], ['panel_house', 'models/city/panel_house.glb'], ['towers_pack', 'models/city/towers_pack.glb']].map(async ([id, url]) => {
+  const extras = [['tashkent_tower', 'models/tashkent_tower.glb'], ['gas_shell', 'models/city/gas_shell.glb'], ['park_square', 'models/city/park_square.glb'], ['modern_house', 'models/city/modern_house.glb'], ['panel_house', 'models/city/panel_house.glb'], ['towers_pack', 'models/city/towers_pack.glb'], ...['barbershop', 'coffee_shop', 'car_service', 'residential_tower', 'housing_estate', 'burger_restaurant', 'business_building', 'car_wash'].map(k => [k, `models/city/${k}.glb`])].map(async ([id, url]) => {
     try { extraModels.set(id, (await load(id, url)).scene); } catch (e) { console.warn('Нет модели', url, e); }
   });
   await Promise.all([...extras, ...CARS.map(async spec => {
@@ -373,11 +382,16 @@ function splitWheels(W, wrap) {
   for (const p of pivots) if (p.children.length) wrap.add(p);
 }
 
+// Автоэмаль: базовый цвет + металлик + прозрачный лак с отражениями (чёрный тоже читается — по бликам)
 function paintMaterial(base, hex) {
   const key = base.uuid + hex;
   if (!paintCache.has(key)) {
-    const m = base.clone(); m.color.set(hex);
-    if ('metalness' in m) { m.metalness = Math.min(m.metalness, 0.5); m.roughness = Math.min(m.roughness, 0.35); }
+    const c = COLORS.find(c => c.hex === hex), metal = c?.metal ?? 0.05;
+    const m = new THREE.MeshPhysicalMaterial({
+      name: base.name, color: new THREE.Color(hex), map: null, normalMap: base.normalMap || null,
+      metalness: metal, roughness: metal > 0.2 ? 0.38 : 0.3, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.15,
+      side: base.side,
+    });
     paintCache.set(key, m);
   }
   return paintCache.get(key);

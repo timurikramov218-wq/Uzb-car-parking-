@@ -13,7 +13,7 @@ const WHITE = COLORS[0].hex;
 
 // ---------- Сохранение ----------
 const SAVE_KEY = 'uzbcarparking-save-v2';
-const save = Object.assign({ money: 1500, owned: ['matiz'], car: 'matiz', colors: {}, stars: {}, plate: randomPlate(), tune: {}, bought: [], fuel: 1, damage: 0 },
+const save = Object.assign({ money: 1500, owned: ['matiz'], car: 'matiz', colors: {}, stars: {}, plate: randomPlate(), tune: {}, bought: [], fuel: 1, damage: 0, dirt: 0 },
   (() => { try { return JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; } catch { return {}; } })());
 if (!CARS.some(c => c.id === save.car)) save.car = 'matiz';
 save.owned = CARS.map(c => c.id);          // все машины бесплатные и сразу в гараже
@@ -43,7 +43,7 @@ scene.fog = new THREE.Fog(0xdfe6ea, 400, 7600);
 }
 const hemiMain = new THREE.HemisphereLight(0xdfeeff, 0x9a8a6a, 0.55); scene.add(hemiMain);
 // окружение для отражений: машины, стекло и металл выглядят реалистично, а не «пластиком»
-import('three/addons/environments/RoomEnvironment.js').then(({ RoomEnvironment }) => {
+void import('three/addons/environments/RoomEnvironment.js').then(({ RoomEnvironment }) => {
   const pm = new THREE.PMREMGenerator(renderer);
   scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environmentIntensity = 0.55;
@@ -150,7 +150,17 @@ function rebuildPlayer() {
   player.setSpec(tunedSpec(carById(save.car), t, save.damage));
   playerMesh = buildCarMesh(carById(save.car), colorOf(save.car), save.plate);
   applyTune(playerMesh, player.spec, t);
+  // своя копия краски у машины игрока — чтобы показывать грязь
+  playerPaint = [];
+  playerMesh.traverse(o => { if (o.isMesh && o.material?.clearcoat !== undefined && o.material.clearcoat > 0) { o.material = o.material.clone(); o.material.userData.base = o.material.color.clone(); playerPaint.push(o.material); } });
+  applyDirt();
   scene.add(playerMesh); syncMesh(playerMesh, player);
+}
+let playerPaint = [];
+const DIRT = new THREE.Color(0x8a7a62);
+function applyDirt() {
+  const d = save.dirt || 0;
+  for (const m of playerPaint) { m.color.copy(m.userData.base).lerp(DIRT, d * 0.45); m.clearcoat = 1 - d * 0.85; m.roughness = 0.3 + d * 0.5; }
 }
 function syncMesh(mesh, v) {
   mesh.position.set(v.x, v.y || 0, v.z); mesh.rotation.order = 'YZX'; mesh.rotation.set(v.tRoll || 0, v.h, v.tPitch || 0);
@@ -173,22 +183,37 @@ function updateCamera(dt, snap = false) {
   const c = CAMS[camIdx];
   let dh = player.h - camHeading; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
   camHeading += dh * (snap ? 1 : 1 - Math.exp(-dt * 4));
-  const fx = Math.cos(camHeading), fz = -Math.sin(camHeading);
+  if (!orbitHeld) { camYaw *= Math.exp(-dt * (Math.abs(player.speed) > 2 ? 1.6 : 0.4)); camPitch *= Math.exp(-dt * 1.2); }   // отпустил — камера плавно возвращается
+  const ch = camHeading + camYaw, fx = Math.cos(ch), fz = -Math.sin(ch);
   const py = player.y || 0;
   const want = new THREE.Vector3(), look = new THREE.Vector3(player.x, 1 + py, player.z);
   if (c.inside) {
-    const s = player.spec, hx = Math.cos(player.h), hz = -Math.sin(player.h);
+    const s = player.spec, hx = Math.cos(player.h), hz = -Math.sin(player.h), lh = player.h + camYaw, lx = Math.cos(lh), lz = -Math.sin(lh);
     camPos.set(player.x - hx * s.len * 0.08 + hz * 0.32, s.hgt * 0.78 + py, player.z - hz * s.len * 0.08 - hx * 0.32);
-    camLook.set(player.x + hx * 20, s.hgt * 0.7 + py + Math.tan(player.tPitch || 0) * 20, player.z + hz * 20);
+    camLook.set(camPos.x + lx * 20, s.hgt * 0.7 + py + Math.tan((player.tPitch || 0) + camPitch) * 20, camPos.z + lz * 20);
   } else {
     if (c.top) want.set(player.x - fx * 0.01, 34 + py, player.z - fz * 0.01);
-    else { const gy = Math.max(world.surfaceAt(player.x - fx * c.dist, player.z - fz * c.dist, py) + 1.5, py + c.h); want.set(player.x - fx * c.dist, gy, player.z - fz * c.dist); look.y = 1 + py; }
-    const k = snap ? 1 : 1 - Math.exp(-dt * 5);
+    else { const ph = Math.min(1.2, Math.max(-0.25, camPitch)), d = c.dist * Math.cos(ph), hh = c.h + c.dist * Math.sin(ph); const gy = Math.max(world.surfaceAt(player.x - fx * d, player.z - fz * d, py) + 1.5, py + hh); want.set(player.x - fx * d, gy, player.z - fz * d); look.y = 1 + py; }
+    const k = snap || orbitHeld ? 1 : 1 - Math.exp(-dt * 5);
     camPos.lerp(want, k); camLook.lerp(look, k);
   }
   camera.up.set(c.top ? fx : 0, c.top ? 0 : 1, c.top ? fz : 0);
   camera.position.copy(camPos); camera.lookAt(camLook);
   playerMesh.visible = !c.inside;
+}
+
+// ---------- Осмотр машины: тянешь по экрану — камера облетает машину (в любой камере) ----------
+let camYaw = 0, camPitch = 0, orbitHeld = false;
+{
+  let id = null, lx = 0, ly = 0;
+  $('game').addEventListener('pointerdown', e => { if (!playing()) return; id = e.pointerId; lx = e.clientX; ly = e.clientY; orbitHeld = true; });
+  addEventListener('pointermove', e => {
+    if (e.pointerId !== id) return;
+    camYaw -= (e.clientX - lx) * 0.008; camPitch += (e.clientY - ly) * 0.005; lx = e.clientX; ly = e.clientY;
+    camYaw = Math.atan2(Math.sin(camYaw), Math.cos(camYaw)); camPitch = Math.min(1.1, Math.max(-0.3, camPitch));
+  });
+  const up = e => { if (e.pointerId === id) { id = null; orbitHeld = false; } };
+  addEventListener('pointerup', up); addEventListener('pointercancel', up);
 }
 
 // ---------- Мини-карта ----------
@@ -389,15 +414,19 @@ let svc = null;
 function serviceCheck(dt) {
   const dist = Math.abs(player.speed) * dt;
   save.fuel = Math.max(0, save.fuel - dist / 14000);
+  const d0 = save.dirt; save.dirt = Math.min(1, save.dirt + dist / 9000);
+  if (Math.floor(d0 * 20) !== Math.floor(save.dirt * 20)) applyDirt();
+  if (d0 < 0.6 && save.dirt >= 0.6) toast('Машина грязная — заедь на мойку', 2600);
   $('fuel-bar').style.width = save.fuel * 100 + '%'; $('fuel-bar').classList.toggle('low', save.fuel < 0.15);
   $('hp-bar').style.width = (1 - save.damage) * 100 + '%'; $('hp-bar').classList.toggle('low', save.damage > 0.6);
   svc = null;
   if (mode === 'free' && Math.abs(player.speed) < 1.5) for (const z of world.services || []) if (Math.hypot(player.x - z.x, player.z - z.z) < z.r) { svc = z; break; }
   const b = $('svc-btn');
   if (svc) {
-    const cost = svc.type === 'gas' ? Math.ceil((1 - save.fuel) * 300) : svc.type === 'repair' ? Math.ceil(save.damage * 800) : 0;
+    const cost = svc.type === 'gas' ? Math.ceil((1 - save.fuel) * 300) : svc.type === 'repair' ? Math.ceil(save.damage * 800) : svc.type === 'wash' ? 40 : 0;
     b.dataset.cost = cost;
-    b.textContent = svc.type === 'gas' ? (save.fuel > 0.98 ? 'Бак полный' : `Заправить · ${fmt(cost)} сум`) : svc.type === 'repair' ? (save.damage < 0.02 ? 'Машина целая' : `Починить · ${fmt(cost)} сум`) : 'Тюнинг-ателье';
+    if (svc.type === 'wash' && save.dirt < 0.05) b.dataset.cost = 0;
+    b.textContent = svc.type === 'gas' ? (save.fuel > 0.98 ? 'Бак полный' : `Заправить · ${fmt(cost)} сум`) : svc.type === 'repair' ? (save.damage < 0.02 ? 'Машина целая' : `Починить · ${fmt(cost)} сум`) : svc.type === 'wash' ? (save.dirt < 0.05 ? 'Машина чистая' : `Помыть · ${fmt(cost)} сум`) : 'Тюнинг-ателье';
   }
   b.hidden = !svc;
 }
@@ -409,6 +438,7 @@ $('svc-btn').onclick = () => {
   if (save.money < cost) { toast('Не хватает денег', 2000, true); return; }
   save.money -= cost;
   if (svc.type === 'gas') { save.fuel = 1; toast('Полный бак'); audio.ding(); }
+  else if (svc.type === 'wash') { save.dirt = 0; applyDirt(); toast('Блестит как новая'); audio.ding(); }
   else { save.damage = 0; rebuildPlayer(); toast('Машина как новая'); audio.ding(); }
   persist(); updateMoney();
 };
@@ -544,12 +574,23 @@ function frame() {
     const yF = hAt(player.x + hx * hl, player.z + hz * hl), yB = hAt(player.x - hx * hl, player.z - hz * hl);
     player.grade = (yF - yB) / player.spec.len;
     const noFuel = mode === 'free' && save.fuel <= 0;
-    const hit = player.update(dt, noFuel ? { ...input, up: false } : input, world.obstacles, CITY_HALF);
+    const hit = player.update(dt, player.air ? { up: false, down: false, left: false, right: false, brake: false } : noFuel ? { ...input, up: false } : input, world.obstacles, CITY_HALF);   // в полёте колёса не цепляются
     if (mode === 'free' && hit > 3) { save.damage = Math.min(1, save.damage + (hit - 3) * 0.012); if (save.damage > 0.6 && !player._slowed) { player._slowed = true; player.setSpec(tunedSpec(carById(save.car), tuneOf(save, save.car), save.damage)); toast('Машина повреждена — заедь в автосервис', 3000, true); } }
     if (noFuel && !player._dry) { player._dry = true; toast('Бензин кончился — R вернёт на старт с запасом', 3500, true); }
-    const yN = world.surfaceAt(player.x, player.z, Y);
-    player.vy = yN < Y - 0.4 ? (player.vy || 0) - 9.81 * dt : 0;          // падение с края — с ускорением
-    player.y = player.vy ? Math.max(yN, Y + player.vy * dt) : yN;
+    // вертикаль: машина едет по поверхности, но сохраняет вертикальную скорость —
+    // на горбе моста или съезде с эстакады на скорости может оторваться и приземлиться
+    const yN = world.surfaceAt(player.x, player.z, Y + Math.max(0, player.vy || 0) * dt);
+    let vy = player.vy || 0;
+    if (player.air || yN < Y + vy * dt - 0.05) {
+      vy -= 9.81 * dt; let yy = Y + vy * dt;
+      if (yy <= yN) { yy = yN; if (vy < -5) { audio.thump(-vy * 0.8); player.tPitch -= 0.05; } if (vy < -9 && mode === 'free') save.damage = Math.min(1, save.damage + 0.03); vy = Math.max(0, (yN - Y) / dt * 0.3); player.air = false; }
+      else player.air = true;
+      player.y = yy;
+    } else {
+      const vyS = Math.max(-25, Math.min(25, (yN - Y) / Math.max(dt, 1e-3)));
+      vy += (vyS - vy) * Math.min(1, dt * 12); player.y = yN; player.air = false;
+    }
+    player.vy = vy;
     const yL = hAt(player.x + hz * hw, player.z - hx * hw), yR = hAt(player.x - hz * hw, player.z + hx * hw);
     const k = 1 - Math.exp(-dt * 10);
     player.tPitch = (player.tPitch || 0) + (Math.atan2(yF - yB, player.spec.len) - (player.tPitch || 0)) * k;

@@ -1101,7 +1101,7 @@ export class World {
   parkedCar(x, z, h) {
     const pool = CARS.flatMap(c => Array(c.parked || 1).fill(c));       // Matiz и Nexia встречаются чаще всего
     const spec = pick(pool);
-    const col = rnd() < 0.8 ? '#f4f4f2' : pick(['#b9bdc3', '#50555c', '#16171a']);   // в Ташкенте почти все машины белые
+    const col = rnd() < 0.8 ? '#eeeeea' : pick(['#a9adb2', '#4b4f55', '#0d0e10']);   // в Ташкенте почти все машины белые
     this.obstacles.add(addCarToBuckets(spec, col, x, z, h, this.carBuckets));
   }
 

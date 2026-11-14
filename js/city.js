@@ -2,7 +2,7 @@
 // эстакада над городом, тоннель через холм, кольцевая дорога, районы с разной застройкой.
 import * as THREE from 'three';
 import { World, M, T, rnd, rr, pick, uvs, canvasTex, normalFrom } from './world.js';
-import { CARS, extraModels, addCarToBuckets } from './cars.js';
+import { CARS, COLORS, extraModels, addCarToBuckets } from './cars.js';
 import { satOBB } from './physics.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -141,7 +141,7 @@ export class City extends World {
       for (const n of this.nodes) q.push(() => this.buildJunction(n));
       q.push(() => this.buildPlaces());
       q.push(() => {
-        this.lots = []; this.lotGrid = new SegHash(60); this.lotCount = { gas: 0, service: 0, tune: 0, square: 0 };
+        this.lots = []; this.lotGrid = new SegHash(60); this.modelGrid = new SegHash(80); this.lotCount = { gas: 0, service: 0, serviceM: 0, tune: 0, square: 0, wash: 0 };
         for (const e of this.edges.filter(e => e.kind === 'ground' || e.kind === 'bridge').sort(() => rnd() - 0.5)) q.push(() => this.lotsAlong(e));
         q.push(() => this.scatter());
         q.push(() => {          // въезды в сервисы и на заправки свободны: убираем деревья и фонари перед ними
@@ -736,17 +736,17 @@ export class City extends World {
     for (const sd of [-1, 1]) {
       let s = sa + rr(0, 6);
       while (s < sb - 8) {
-        const p = cAt(P, s), D = district(p.x, p.z), kind = this.lotKind(D, e);
+        const p = cAt(P, s), D = district(p.x, p.z), kind = this.lotKind(D, e, p.x, p.z);
         const { w, d, back } = kind;
         if (s + w > sb) break;
         const pm = cAt(P, s + w / 2), off = hwT + back + d / 2, nx = -pm.tz * sd, nz = pm.tx * sd;
         const x = pm.x + nx * off, z = pm.z + nz * off, rot = this.roadRot(pm);
         if (this.lotFree(x, z, w, d, rot)) {
           this.addLot(x, z, w, d, rot);
-          if (this.lotCount[kind.type] !== undefined) this.lotCount[kind.type]++;
+          const cKey = kind.type === 'serviceM' ? 'service' : kind.type; if (this.lotCount[cKey] !== undefined) this.lotCount[cKey]++;
           this.buildLot(kind, x, z, w, d, rot, -sd, D, e);
           if ((D.kind === 'down' || D.kind === 'mid' || D.kind === 'old') && ['tower', 'mid', 'house'].includes(kind.type)) {   // второй ряд
-            const k2 = this.lotKind(D, null), off2 = off + d / 2 + 10 + k2.d / 2, x2 = pm.x + nx * off2, z2 = pm.z + nz * off2;
+            const k2 = this.lotKind(D, null, pm.x + nx * (off + 30), pm.z + nz * (off + 30)), off2 = off + d / 2 + 10 + k2.d / 2, x2 = pm.x + nx * off2, z2 = pm.z + nz * off2;
             if (k2.w <= w + 10 && this.lotFree(x2, z2, k2.w, k2.d, rot)) { this.addLot(x2, z2, k2.w, k2.d, rot); this.buildLot(k2, x2, z2, k2.w, k2.d, rot, -sd, D, null); }
           }
           s += w + rr(3, 9);
@@ -755,17 +755,47 @@ export class City extends World {
     }
   }
 
-  lotKind(D, e) {
-    const main = e && e.type === 'main', r = rnd(), C = this.lotCount;
-    if (main && C.gas < 9 && r < 0.07) return { type: 'gas', w: 34, d: 26, back: 4 };
+  // каталог готовых зданий: масштаб под реальные метры, где ставить
+  catalog() {
+    if (this._cat) return this._cat;
+    const def = [
+      ['panel_house', 0.265, 'res'], ['residential_tower', 1, 'res'], ['housing_estate', 1, 'res'], ['business_building', 40, 'res'],
+      ['residential_tower', 1, 'down'], ['business_building', 40, 'down'],
+      ['barbershop', 0.32, 'shop'], ['coffee_shop', 0.25, 'shop'], ['burger_restaurant', 1, 'shop'],
+      ['modern_house', 1, 'villa'],
+    ];
+    const out = [];
+    for (const [id, S, role] of def) { const mp = this.modelParts(id); if (!mp) continue; const sz = mp.box.getSize(new THREE.Vector3()).multiplyScalar(S); out.push({ id, S, role, o: mp, w: sz.x, d: sz.z }); }
+    for (const [k, o] of (this.modelPieces('towers_pack') || []).entries()) { const sz = o.box.getSize(new THREE.Vector3()); out.push({ id: 'tw' + k, S: 1, role: 'down', o, w: sz.x, d: sz.z }); }
+    return (this._cat = out);
+  }
+  // выбор модели без повторов: та же модель не ближе ~140 м
+  pickModel(role, x, z) {
+    const list = this.catalog().filter(c => c.role === role); if (!list.length) return null;
+    for (let t = 0; t < 6; t++) {
+      const c = pick(list); let near = false;
+      for (const sg of this.modelGrid.near(x, z, 140)) if (sg.data === c.id && Math.hypot(sg.ax - x, sg.az - z) < 140) { near = true; break; }
+      if (!near) return c;
+    }
+    return null;
+  }
+
+  lotKind(D, e, x = 0, z = 0) {
+    const main = e && e.type === 'main', r = rnd(), C = this.lotCount, R0 = Math.hypot(x, z);
+    if (main && C.gas < 14 && r < 0.06) return { type: 'gas', w: 34, d: 26, back: 4 };
+    if (main && C.wash < 8 && r > 0.06 && r < 0.085 && this.modelParts('car_wash')) { const sz = this.modelParts('car_wash').box.getSize(new THREE.Vector3()).multiplyScalar(0.33); return { type: 'wash', w: sz.x + 4, d: sz.z + 2, back: 3 }; }
+    if (main && C.service < 10 && r > 0.085 && r < 0.115 && D.kind !== 'down' && this.modelParts('car_service')) { const sz = this.modelParts('car_service').box.getSize(new THREE.Vector3()).multiplyScalar(0.45); return { type: 'serviceM', w: sz.x + 4, d: sz.z + 8, back: 3 }; }
     if (C.square < 7 && r > 0.115 && r < 0.14 && (D.kind === 'down' || D.kind === 'mid' || D.kind === 'old') && this.modelParts('park_square')) return { type: 'square', w: 54, d: 70, back: 3 };
-    if (main && C.service < 6 && r > 0.07 && r < 0.1 && D.kind !== 'down') return { type: 'service', w: 30, d: 22, back: 4 };
-    if (main && C.tune < 3 && r > 0.1 && r < 0.115) return { type: 'tune', w: 30, d: 22, back: 4 };
+    if (main && C.tune < 5 && r > 0.14 && r < 0.155) return { type: 'tune', w: 30, d: 22, back: 4 };
     if (e && r > 0.965) return { type: 'parking', w: rr(30, 50), d: rr(20, 34), back: 1 };
-    const MH = this.modelParts('modern_house'), PH = this.modelParts('panel_house'), TW = this.modelPieces('towers_pack');
-    if (D.kind === 'sub' && MH && r < 0.55) return { type: 'villa', w: 22, d: 22, back: 3 };
-    if ((D.kind === 'mid' || D.kind === 'old' || D.kind === 'down') && PH && r > 0.55 && r < (D.kind === 'down' ? 0.68 : 0.85)) return { type: 'panelM', w: 30, d: 28, back: 6 };
-    if (D.kind === 'down' && TW && TW.length && r < 0.32) { const k = Math.floor(rnd() * TW.length), sz = TW[k].box.getSize(new THREE.Vector3()); return { type: 'towerM', k, w: sz.x + 6, d: sz.z + 6, back: 4 }; }
+    const model = role => { const c = this.pickModel(role, x, z); return c && { type: 'model', c, w: c.w + 4, d: c.d + 4, back: role === 'shop' ? 3 : 5 }; };
+    let m = null;
+    if (R0 > 980 && (D.kind === 'sub' || D.kind === 'mid') && r < 0.75) m = model('villa');                 // частные дома — на окраинах
+    else if (main && D.kind !== 'ind' && r > 0.6 && r < 0.72) m = model('shop');
+    else if (D.kind === 'down' && r < 0.6) m = model('down');
+    else if ((D.kind === 'mid' || D.kind === 'old' || D.kind === 'sub' || D.kind === 'down') && r > 0.2 && r < 0.75) m = model('res');
+    if (m) return m;
+    if (D.kind === 'sub' && R0 <= 980) D = { ...D, kind: 'mid' };                                            // ближе к центру — не частный сектор
     switch (D.kind) {
       case 'down':
         if (r < 0.5) return { type: 'tower', w: rr(26, 40), d: rr(24, 34), back: 4, fl: Math.floor(rr(14, 38)), mat: pick([M.glass, M.modernA, M.modernB, M.modernC, M.office]) };
@@ -830,6 +860,14 @@ export class City extends World {
       case 'gas': if (this.modelParts('gas_shell')) { const c2 = Math.cos(rot), s2 = Math.sin(rot); this.quad(M.asphalt, x, 0.04, z, w, d, rot, w / 12, d / 12); this.shellStation(x + s2 * face * 1, z + c2 * face * 1, rot, face); } else this.gasStation(x, z, w, d, rot, face); break;
       case 'square': this.parkSquare(x, z, rot); break;
       case 'villa': this.placeObj(this.modelParts('modern_house'), x, z, rot + (face > 0 ? 0 : Math.PI), 1); break;
+      case 'model': {
+        const c = k.c; if (c.role !== 'villa') this.quad(M.plaza, x, 0.03, z, w + 2, d + 2, rot, (w + 2) / 8, (d + 2) / 8);
+        this.placeObj(c.o, x, z, rot + (face > 0 ? 0 : Math.PI), c.S); this.modelGrid.add(x, z, x, z, c.id);
+        if (c.role === 'shop' && e) this.parkingLot(...this.frontOf(x, z, rot, face, d / 2 + 5), rot, Math.min(w, 30), 8);
+        break;
+      }
+      case 'wash': this.carWash(x, z, w, d, rot, face); break;
+      case 'serviceM': this.carService(x, z, w, d, rot, face); break;
       case 'panelM': this.quad(M.plaza, x, 0.03, z, w + 6, d + 6, rot, (w + 6) / 8, (d + 6) / 8); this.placeObj(this.modelParts('panel_house'), x, z, rot + rnd() * 0.0, 0.265); break;
       case 'towerM': this.quad(M.plaza, x, 0.03, z, w + 4, d + 4, rot, (w + 4) / 8, (d + 4) / 8); this.placeObj(this.modelPieces('towers_pack')[k.k], x, z, rot, 1); break;
       case 'service': this.serviceShop(x, z, w, d, rot, face, false); break;
@@ -940,7 +978,7 @@ export class City extends World {
     this.parkedN = (this.parkedN || 0) + 1;
     if (this.parkedN > 240) return;
     const pool = CARS.filter(c => c.lod).flatMap(c => Array(c.parked || 1).fill(c)), spec = pick(pool);
-    const col = rnd() < 0.7 ? '#f4f4f2' : pick(['#b9bdc3', '#50555c', '#16171a', '#7a1f2b', '#1f3f7a']);
+    const col = rnd() < 0.6 ? '#eeeeea' : pick(COLORS.slice(1)).hex;
     this.obstacles.add(addCarToBuckets(spec, col, x, z, h, this.carBuckets));
   }
 
@@ -980,12 +1018,12 @@ export class City extends World {
     for (const ch of rootN.children) { const p = this.modelParts(id, ch); if (!p.parts.length) continue; const sz = p.box.getSize(new THREE.Vector3()); if (sz.y > 45 && sz.y > Math.max(sz.x, sz.z) * 1.5 && Math.max(sz.x, sz.z) < 60) out.push(p); }
     return (this._pc[id] = out);
   }
-  placeObj(o, x, z, rot, S) {
+  placeObj(o, x, z, rot, S, collide = true) {
     const c = o.box.getCenter(new THREE.Vector3());
     const M4 = new THREE.Matrix4().makeTranslation(x, 0, z).multiply(new THREE.Matrix4().makeRotationY(rot)).multiply(new THREE.Matrix4().makeScale(S, S, S)).multiply(new THREE.Matrix4().makeTranslation(-c.x, -o.box.min.y, -c.z));
     for (const p of o.parts) this.push(p.m, p.g.clone().applyMatrix4(M4));
     const sz = o.box.getSize(new THREE.Vector3());
-    this.obstacles.add({ x, z, h: rot, hl: sz.x * S / 2, hw: sz.z * S / 2 });
+    if (collide) this.obstacles.add({ x, z, h: rot, hl: sz.x * S / 2, hw: sz.z * S / 2 });
     return sz.multiplyScalar(S);
   }
   // матрица модели: центр по x/z в точку, поворот, масштаб
@@ -1038,6 +1076,24 @@ export class City extends World {
     ob(b.min.x, b.max.x, b.min.z, b.min.z + 0.8); ob(b.min.x, b.max.x, b.max.z - 0.8, b.max.z);
     ob(b.min.x, b.min.x + 0.8, b.min.z, b.max.z); ob(b.max.x - 0.8, b.max.x, b.min.z, b.max.z);
     this.labels.push({ x, z, text: 'Сквер', small: true });
+  }
+
+  frontOf(x, z, rot, face, dist) { return [x + Math.sin(rot) * face * dist, z + Math.cos(rot) * face * dist]; }
+  carWash(x, z, w, d, rot, face) {
+    this.quad(M.concrete, x, 0.04, z, w, d, rot, w / 8, d / 8);
+    const A = rot + Math.PI / 2;                                   // длинная сторона мойки — вдоль дороги
+    this.placeObj(this.modelParts('car_wash'), x, z, A, 0.33, false);                // моечные боксы — насквозь проезжаемые
+    const sz = this.modelParts('car_wash').box.getSize(new THREE.Vector3()).multiplyScalar(0.33);
+    this.services.push({ type: 'wash', x, z, r: Math.max(sz.x, sz.z) * 0.32, nx: face * Math.sin(rot), nz: face * Math.cos(rot) });
+    this.labels.push({ x, z, text: 'Мойка', small: true });
+  }
+  carService(x, z, w, d, rot, face) {
+    this.quad(M.asphalt, x, 0.04, z, w, d, rot, w / 12, d / 12);
+    const [bx, bz] = this.frontOf(x, z, rot, -face, 3);
+    this.placeObj(this.modelParts('car_service'), bx, bz, rot + (face > 0 ? 0 : Math.PI), 0.45);
+    const [sx, sz] = this.frontOf(x, z, rot, face, d / 2 - 3);
+    this.services.push({ type: 'repair', x: sx, z: sz, r: 7, nx: face * Math.sin(rot), nz: face * Math.cos(rot) });
+    this.labels.push({ x, z, text: 'Автосервис', small: true });
   }
 
   // ---------- автосервис и тюнинг-ателье: можно заехать внутрь ----------
