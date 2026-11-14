@@ -2,7 +2,7 @@
 // эстакада над городом, тоннель через холм, кольцевая дорога, районы с разной застройкой.
 import * as THREE from 'three';
 import { World, M, T, rnd, rr, pick, uvs, canvasTex, normalFrom } from './world.js';
-import { CARS, extraModels } from './cars.js';
+import { CARS, extraModels, addCarToBuckets } from './cars.js';
 import { satOBB } from './physics.js';
 
 export const CITY_HALF = 1600;                         // граница, дальше машина не уедет
@@ -375,13 +375,14 @@ export class City extends World {
   }
   // высота опоры под машиной: земля или полотно моста/эстакады/тоннеля, ближайшее к текущей высоте
   surfaceAt(x, z, y = 0) {
-    let best = this.groundAt(x, z), bd = Math.abs(best - y);
+    // опора — самая высокая поверхность, на которую можно въехать (не выше текущей + 0,6 м)
+    const g = this.groundAt(x, z); let best = g <= y + 0.6 ? g : -Infinity, low = g;
     for (const sg of this.deckHash.near(x, z, 14)) {
       const q = cSegDist(x, z, sg.ax, sg.az, sg.bx, sg.bz); if (q.d > sg.data.hw) continue;
       const h = sg.data.h0 + (sg.data.h1 - sg.data.h0) * q.t;
-      if (Math.abs(h - y) < bd - 0.01) { bd = Math.abs(h - y); best = h; }
+      if (h <= y + 0.6) { if (h > best) best = h; } else if (h < low) low = h;
     }
-    return best;
+    return best > -Infinity ? best : low;
   }
 
   // ---------- строители лент ----------
@@ -669,7 +670,7 @@ export class City extends World {
     const rows = d >= 36 ? [-d / 2 + 3, d / 2 - 3] : [-d / 2 + 3];
     for (const rz of rows) for (let lx = -w / 2 + 3; lx < w / 2 - 3; lx += 3) {
       const [mx, mz] = P(lx, rz); this.quad(M.mark, mx, 0.07, mz, 0.12, 5, rot, 1, 1);
-      if (lx + 3 < w / 2 - 3 && rnd() < (many ? 0.6 : 0.4)) { const [cx, cz] = P(lx + 1.5, rz); this.parkedCar(cx, cz, rot + (rz < 0 ? -Math.PI / 2 : Math.PI / 2)); }
+      if (lx + 3 < w / 2 - 3 && rnd() < (many ? 0.35 : 0.2)) { const [cx, cz] = P(lx + 1.5, rz); this.parkedCar(cx, cz, rot + (rz < 0 ? -Math.PI / 2 : Math.PI / 2)); }
     }
   }
 
@@ -818,7 +819,7 @@ export class City extends World {
       const [fx, fz] = P(lx, lz); this.box(M.white, fx, 0, fz, sx, 1.1, sz, rot, false);
     }
     const [dx, dz] = P(fw * 0.1, face * (fd / 2 - 1.5)); this.quad(M.lane, dx, 0.05, dz, 3.4, 3, rot, 1, 1);
-    if (rnd() < 0.4) { const [cx, cz] = P(fw * 0.1, face * (fd / 2 + 3.2)); this.parkedCar(cx, cz, rot - Math.PI / 2); }
+    if (rnd() < 0.12) { const [cx, cz] = P(fw * 0.1, face * (fd / 2 + 3.2)); this.parkedCar(cx, cz, rot - Math.PI / 2); }
     if (rnd() < 0.8) { const [tx, tz] = P(-fw * 0.38, -face * fd * 0.3); this.trees.push({ x: tx, z: tz, s: rr(0.6, 0.9), kind: pick(['fruit', 'fruit', 'chinar', 'pine']), noCollide: true }); }
   }
 
@@ -885,6 +886,15 @@ export class City extends World {
       .reduce((b, e) => { const p = cAt(e.P, e.P.len / 2); return Math.hypot(p.x - c.x, p.z - c.z) < (b ? b.d : Infinity) ? { e, d: Math.hypot(p.x - c.x, p.z - c.z) } : b; }, null).e;
     const p = cAt(e.P, e.P.len / 2), l = e.hw * 0.5;
     this.spawn = { x: p.x - p.tz * l, z: p.z + p.tx * l, h: this.roadRot(p) };
+  }
+
+  // стоящие машины: не больше ~240 на весь город, без тяжёлой Damas
+  parkedCar(x, z, h) {
+    this.parkedN = (this.parkedN || 0) + 1;
+    if (this.parkedN > 240) return;
+    const pool = CARS.filter(c => c.lod).flatMap(c => Array(c.parked || 1).fill(c)), spec = pick(pool);
+    const col = rnd() < 0.7 ? '#f4f4f2' : pick(['#b9bdc3', '#50555c', '#16171a', '#7a1f2b', '#1f3f7a']);
+    this.obstacles.add(addCarToBuckets(spec, col, x, z, h, this.carBuckets));
   }
 
   // деревья пачками по квадратам 400 м: невидимые пачки не рисуются

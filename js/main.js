@@ -40,7 +40,7 @@ scene.fog = new THREE.Fog(0xdfe6ea, 400, 7600);
   });
   const sky = new THREE.Mesh(new THREE.SphereGeometry(11000, 32, 16), m); sky.renderOrder = -1; scene.add(sky); scene.userData.sky = sky;
 }
-scene.add(new THREE.HemisphereLight(0xdfeeff, 0x9a8a6a, 1.0));
+const hemiMain = new THREE.HemisphereLight(0xdfeeff, 0x9a8a6a, 1.0); scene.add(hemiMain);
 const sun = new THREE.DirectionalLight(0xfff0d8, 2.5);
 sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -80, right: 80, top: 80, bottom: -80, near: 1, far: 500 });
@@ -223,8 +223,9 @@ let toastT;
 function toast(text, ms = 2200, bad = false) { const t = $('toast'); t.textContent = text; t.classList.toggle('bad', bad); t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); }
 function updateMoney() {
   $('money').textContent = fmt(save.money);
-  $('menu-money').textContent = `${fmt(save.money)} сум · ${carById(save.car).name}`;
-  $('garage-money').textContent = `${fmt(save.money)} сум на счету`;
+  $('menu-money').textContent = fmt(save.money);
+  $('garage-money').textContent = fmt(save.money);
+  $('menu-car-name').textContent = carById(save.car).name;
 }
 
 function enterPlay(m) {
@@ -515,6 +516,7 @@ function frame() {
   }
   if (world) world.updateSignals(t);
   audio.update(player ? player.speed : 0, input.up || input.down, input.horn, playing());
+  sun.intensity = inHangar ? 0.35 : 2.5; hemiMain.intensity = inHangar ? 0.2 : 1.0;
   if (inHangar) { sun.position.set(HANGAR.x + SUN_OFF.x, SUN_OFF.y, HANGAR.z + SUN_OFF.z); sun.target.position.set(HANGAR.x, 0, HANGAR.z); }
   else if (player) { const py = player.y || 0; sun.position.set(player.x + SUN_OFF.x, SUN_OFF.y + py, player.z + SUN_OFF.z); sun.target.position.set(player.x, py, player.z); }
   scene.userData.sky.position.copy(camera.position);
@@ -532,7 +534,7 @@ function frame() {
   world = new City(scene);
   $('load-bar').style.width = '75%';
   levels = new LevelRunner(scene, world.obstacles);
-  $('load-bar').style.width = '90%'; $('load-text').textContent = 'Открываем ангар…';
+  $('load-bar').style.width = '90%'; $('load-text').textContent = 'Открываем гараж…';
   await nextFrame();
   hangar = new Hangar(scene);
   player = new Vehicle(carById(save.car));

@@ -1882,7 +1882,12 @@ export class World {
       this.root.add(mesh);
     }
     this.batches.clear();
-    for (const [mat, list] of this.carBuckets) { const m = new THREE.Mesh(mergeGeometries(list), mat); m.castShadow = m.receiveShadow = true; this.root.add(m); }
+    const ctiles = new Map();
+    for (const [mat, list] of this.carBuckets) for (const g of list) {
+      const p = g.attributes.position, key = mat.uuid + Math.floor(p.getX(0) / TILE) + ':' + Math.floor(p.getZ(0) / TILE);
+      if (!ctiles.has(key)) ctiles.set(key, [mat, []]); ctiles.get(key)[1].push(g);
+    }
+    for (const [, [mat, list]] of ctiles) { const m = new THREE.Mesh(mergeGeometries(list), mat); m.castShadow = m.receiveShadow = true; this.root.add(m); }
     this.carBuckets.clear();
     this.instancedTrees(); this.instancedLamps();
   }

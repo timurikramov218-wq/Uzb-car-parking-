@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#17131a">
+<meta name="theme-color" content="#0e1014">
 <title>UZB Car Parking</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@0,500;0,700;1,700;1,800&family=Rubik:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800;900&family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }</script>
 </head>
@@ -58,15 +58,17 @@
 
 <!-- Главное меню -->
 <section id="menu" class="screen menu" hidden>
-  <header class="brand"><i class="mark"></i><span>UZB Car Parking</span><em>Открытый город</em></header>
-  <div class="ikat"></div>
-  <nav class="nav">
-    <button class="nav-item" id="btn-play"><span>Ехать</span><small>Открытый город: мосты, эстакада, тоннель</small></button>
-    <button class="nav-item" id="btn-levels"><span>Парковка</span><small>Десять уровней на автодроме</small></button>
-    <button class="nav-item" id="btn-garage"><span>Гараж</span><small>Ангар, машины и покраска</small></button>
+  <header class="topbar">
+    <div class="brand"><i class="mark"></i><span>UZB <b>Car Parking</b></span></div>
+    <div class="wallet" id="menu-money"></div>
+  </header>
+  <div class="menu-car"><small>За рулём</small><b id="menu-car-name"></b></div>
+  <nav class="dock">
+    <button class="dock-btn" id="btn-garage"><svg viewBox="0 0 24 24"><path d="M3 20V9l9-5 9 5v11"/><path d="M7 20v-6h10v6M7 17h10"/></svg><span>Гараж</span></button>
+    <button class="dock-btn play" id="btn-play"><span>Ехать</span><small>Открытый город</small></button>
+    <button class="dock-btn" id="btn-levels"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 16V8h3.5a2.5 2.5 0 0 1 0 5H9"/></svg><span>Парковка</span></button>
   </nav>
   <footer class="menu-foot">
-    <div class="wallet" id="menu-money"></div>
     <button class="link" id="btn-credits">Авторы моделей</button>
     <p class="credits" id="credits" hidden></p>
   </footer>
@@ -109,7 +111,7 @@
 </section>
 
 <section id="loading" class="screen loading">
-  <div class="brand"><i class="mark"></i><span>UZB Car Parking</span></div>
+  <div class="brand big"><i class="mark"></i><span>UZB <b>Car Parking</b></span></div>
   <div class="bar"><i id="load-bar"></i></div>
   <div class="muted" id="load-text">Загрузка машин…</div>
 </section>
