@@ -270,7 +270,7 @@ function startFree() {
   levels.clear();
   player.reset(SPAWN.x, SPAWN.z, SPAWN.h); camHeading = player.h; updateCamera(0, true);
   enterPlay('free');
-  toast(isTouch ? 'Красная точка на карте — автодром' : 'WASD — ехать · Пробел — ручник · C — камера', 4000);
+  toast(isTouch ? 'Красная точка на карте — автодром' : 'WASD — ехать · Пробел — ручник · C — камера • M — карта', 4000);
 }
 
 function startLevel(i) {
@@ -423,6 +423,114 @@ function hAt(x, z, layer) {
   if (layer >= 10) { const S = STRUCTS[layer - 10], q = structUV(S, x, z); if (Math.abs(q.v - S.node) < S_REACH) return structProfile(S, q.v); }
   return terrain.heightAt(x, z);
 }
+
+// ---------- Большая карта с названиями мест ----------
+const bm = $('bigmap'), bmc = $('bigmap-c'), bctx = bmc.getContext('2d');
+const PARK_RE = /парк|сад|Park|Сайилгох|Magic/i, CITY_RE = /Стадион|Humo|Вокзал|Цирк|Автодром|Tashkent City|Boulevard|Mall|Тоннель|Эстакада|Darvoza|Planet|Театр/i;
+let bmView = { x: 0, z: 0, k: 0.6 }, bmOpen = false, places = null;
+function mapPlaces() {
+  const out = world.labels.map(l => ({ x: l.x, z: l.z, text: l.text, cat: PARK_RE.test(l.text) ? 'park' : CITY_RE.test(l.text) ? 'city' : 'sight' }));
+  if (terrain) {
+    const L = terrain.mapData();
+    out.push({ x: L.lake.x, z: L.lake.z, text: 'Чарвакское водохранилище', cat: 'mount', big: true },
+      { x: L.amir.x, z: L.amir.z, text: 'Амирсай', cat: 'mount', big: true }, { x: L.end.x, z: L.end.z, text: 'Бельдерсай', cat: 'mount', big: true },
+      { x: 0, z: 0, text: 'Ташкент', cat: 'city', big: true, far: true });
+  }
+  const pri = { sight: 0, mount: 0, city: 1, park: 2 };
+  return out.sort((a, b) => pri[a.cat] - pri[b.cat]);
+}
+const CAT_COL = { sight: '#f0b03c', park: '#5cc27a', city: '#e8e4dc', mount: '#6cc4e0' };
+function drawBigMap() {
+  const dpr = Math.min(devicePixelRatio || 1, 2), Wd = bmc.clientWidth, H = bmc.clientHeight;
+  if (bmc.width !== Math.round(Wd * dpr)) { bmc.width = Math.round(Wd * dpr); bmc.height = Math.round(H * dpr); }
+  const g = bctx, k = bmView.k;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = '#141316'; g.fillRect(0, 0, Wd, H);
+  const SX = x => Wd / 2 + (x - bmView.x) * k, SZ = z => H / 2 + (z - bmView.z) * k;
+  g.imageSmoothingEnabled = true;
+  g.drawImage(mapCanvas, SX(MX0), SZ(MZ0), MAP_SIZE * k, MAP_SIZE * k);
+  if (k > 0.35) {         // город поверх — чёткими линиями
+    g.fillStyle = '#26282c'; g.fillRect(SX(-640), SZ(-640), 1280 * k, 1280 * k);
+    g.fillStyle = '#2c3a2f'; g.beginPath(); g.arc(SX(0), SZ(0), RING_IN * k, 0, 7); g.fill();
+    g.fillStyle = '#244b57'; g.fillRect(SX(CANAL_X - CANAL_W / 2), SZ(-640), CANAL_W * k, 1280 * k);
+    g.fillStyle = '#55585f';
+    for (const v of VLINES) g.fillRect(SX(v.x - W[v.t] / 2), SZ(-600), W[v.t] * k, 1200 * k);
+    for (const h of HLINES) g.fillRect(SX(-600), SZ(h.z - W[h.t] / 2), 1200 * k, W[h.t] * k);
+    g.strokeStyle = '#55585f'; g.lineWidth = (RING_OUT - RING_IN) * k; g.beginPath(); g.arc(SX(0), SZ(0), ((RING_IN + RING_OUT) / 2) * k, 0, 7); g.stroke();
+    if (k > 0.8) { g.strokeStyle = '#6c6f77'; g.lineWidth = 1; g.setLineDash([6, 6]);
+      for (const v of VLINES) { g.beginPath(); g.moveTo(SX(v.x), SZ(-600)); g.lineTo(SX(v.x), SZ(600)); g.stroke(); }
+      for (const h of HLINES) { g.beginPath(); g.moveTo(SX(-600), SZ(h.z)); g.lineTo(SX(600), SZ(h.z)); g.stroke(); }
+      g.setLineDash([]); }
+  }
+  // места: сначала все точки, потом подписи поверх (подписи не налезают друг на друга)
+  const vis = places.filter(p => (k < 0.3 ? p.big : !p.far)).map(p => ({ p, px: SX(p.x), py: SZ(p.z) })).filter(q => q.px > -100 && q.py > -40 && q.px < Wd + 100 && q.py < H + 40);
+  for (const { p, px, py } of vis) { g.fillStyle = CAT_COL[p.cat]; g.strokeStyle = '#141316'; g.lineWidth = 2.5; g.beginPath(); g.arc(px, py, p.big ? 7 : 5, 0, 7); g.fill(); g.stroke(); }
+  const boxes = [];
+  for (const { p, px, py } of vis) {
+    const fs = p.big ? 15 : 13; g.font = `${p.big ? 700 : 600} ${fs}px Rubik, Arial, sans-serif`;
+    const tw = g.measureText(p.text).width, by = py - fs / 2 - 3, bw = tw + 10, bh = fs + 7;
+    const hit = bx => bx < 4 || bx + bw > Wd - 4 || boxes.some(b => bx < b[0] + b[2] + 4 && bx + bw + 4 > b[0] && by < b[1] + b[3] + 2 && by + bh + 2 > b[1]);
+    let bx = px + 9; if (hit(bx)) { bx = px - 9 - bw; if (hit(bx)) continue; }
+    boxes.push([bx, by, bw, bh]);
+    g.fillStyle = 'rgba(20,19,22,0.85)'; g.fillRect(bx, by, bw, bh);
+    g.fillStyle = CAT_COL[p.cat]; g.fillRect(bx, by, 3, bh);
+    g.fillStyle = '#f4efe6'; g.textBaseline = 'middle'; g.fillText(p.text, bx + 7, py + 0.5);
+  }
+  // машина игрока
+  if (player) {
+    const px = SX(player.x), py = SZ(player.z);
+    g.save(); g.translate(px, py); g.rotate(-player.h + Math.PI / 2);
+    g.fillStyle = '#d8343f'; g.strokeStyle = '#fff'; g.lineWidth = 2.5;
+    g.beginPath(); g.moveTo(0, -13); g.lineTo(9, 10); g.lineTo(0, 5); g.lineTo(-9, 10); g.closePath(); g.fill(); g.stroke(); g.restore();
+  }
+  // масштабная линейка
+  const m = [50, 100, 200, 500, 1000, 2000].find(v => v * k > 70) || 2000;
+  g.fillStyle = '#f4efe6'; g.fillRect(16, 84, m * k, 3); g.font = '500 12px Rubik, Arial';
+  g.fillText(m >= 1000 ? `${m / 1000} км` : `${m} м`, 16, 74);
+}
+function bmGo(where) {
+  const Wd = bmc.clientWidth || innerWidth, H = bmc.clientHeight || innerHeight, fit = Math.min(Wd, H);
+  if (where === 'city') bmView = { x: 0, z: 0, k: Math.max(fit / 1350, 0.45) };
+  else if (where === 'mount') { const L = terrain.mapData(); bmView = { x: (L.lake.x + L.end.x) / 2 - 200, z: (L.lake.z + L.end.z) / 2 - 100, k: fit / 2800 }; }
+  else bmView = { x: player.x, z: player.z, k: Math.max(bmView.k, fit / 700) };
+  bm.querySelectorAll('[data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === where));
+  drawBigMap();
+}
+function openBigMap() {
+  if (!playing() && !bmOpen) return;
+  places = places || mapPlaces();
+  bmOpen = true; paused = true; bm.hidden = false;
+  Object.keys(input).forEach(k => (input[k] = false));
+  bmGo(player.x > HALF + 200 || player.z < -HALF - 200 ? 'mount' : 'city');
+}
+function closeBigMap() { if (!bmOpen) return; bmOpen = false; bm.hidden = true; paused = false; clock.getDelta(); }
+const bmZoom = (f, cx, cy) => {
+  const Wd = bmc.clientWidth, H = bmc.clientHeight, k0 = bmView.k, k1 = Math.min(6, Math.max(0.08, k0 * f));
+  if (cx !== undefined) { bmView.x += (cx - Wd / 2) * (1 / k0 - 1 / k1); bmView.z += (cy - H / 2) * (1 / k0 - 1 / k1); }
+  bmView.k = k1; drawBigMap();
+};
+$('btn-map').onclick = openBigMap; mm.onclick = openBigMap;
+$('bm-close').onclick = closeBigMap;
+$('bm-in').onclick = () => bmZoom(1.5); $('bm-out').onclick = () => bmZoom(1 / 1.5);
+bm.querySelectorAll('[data-go]').forEach(b => (b.onclick = () => bmGo(b.dataset.go)));
+bmc.addEventListener('wheel', e => { e.preventDefault(); bmZoom(e.deltaY < 0 ? 1.2 : 1 / 1.2, e.offsetX, e.offsetY); }, { passive: false });
+{ const pts = new Map(); let pinch = 0;
+  bmc.addEventListener('pointerdown', e => { bmc.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.offsetX, y: e.offsetY }); });
+  bmc.addEventListener('pointermove', e => {
+    const p = pts.get(e.pointerId); if (!p) return;
+    if (pts.size === 1) { bmView.x -= (e.offsetX - p.x) / bmView.k; bmView.z -= (e.offsetY - p.y) / bmView.k; p.x = e.offsetX; p.y = e.offsetY; drawBigMap(); return; }
+    p.x = e.offsetX; p.y = e.offsetY;
+    const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinch) bmZoom(d / pinch, (a.x + b.x) / 2, (a.y + b.y) / 2); pinch = d;
+  });
+  const up = e => { pts.delete(e.pointerId); pinch = 0; };
+  bmc.addEventListener('pointerup', up); bmc.addEventListener('pointercancel', up);
+}
+addEventListener('resize', () => bmOpen && drawBigMap());
+addEventListener('keydown', e => {
+  if (e.code === 'KeyM') { bmOpen ? closeBigMap() : openBigMap(); }
+  else if (e.code === 'Escape' && bmOpen) { e.stopImmediatePropagation(); closeBigMap(); }
+}, true);
 
 // ---------- Цикл ----------
 const clock = new THREE.Clock();

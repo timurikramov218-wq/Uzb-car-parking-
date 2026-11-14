@@ -199,3 +199,25 @@ h2 { font: italic 800 28px/1.05 var(--font-display); text-transform: uppercase; 
   .screen { padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* ---------- большая карта ---------- */
+#minimap { cursor: pointer; pointer-events: auto; }
+.map-btn { left: auto; right: max(16px, env(safe-area-inset-right)); top: max(76px, calc(env(safe-area-inset-top) + 76px)); }
+.map-btn svg { fill: none; width: 20px; height: 20px; }
+.bigmap { position: fixed; inset: 0; z-index: 30; background: #141316; touch-action: none; }
+.bigmap canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
+.bigmap canvas:active { cursor: grabbing; }
+.bm-head { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 14px; padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 14px max(16px, env(safe-area-inset-left));
+  background: linear-gradient(#141316ee, #14131600); pointer-events: none; }
+.bm-head > * { pointer-events: auto; }
+.bm-head h2 { margin: 0; font: italic 800 26px var(--font-display); }
+.bm-tabs { display: flex; gap: 6px; margin-right: auto; }
+.bm-tabs button { font: 600 14px var(--font-body); color: var(--muted); background: var(--panel); border: 1px solid var(--line); padding: 8px 14px; cursor: pointer; }
+.bm-tabs button.on { color: #1d1820; background: var(--saffron); border-color: var(--saffron); }
+.bm-zoom { position: absolute; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); display: grid; gap: 6px; }
+.bm-zoom button { width: 46px; height: 46px; font: 600 24px var(--font-body); color: var(--text, #fff); background: var(--panel); border: 1px solid var(--line); cursor: pointer; }
+.bm-legend { position: absolute; left: max(16px, env(safe-area-inset-left)); bottom: max(16px, env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; gap: 6px 14px; max-width: calc(100% - 100px);
+  font: 500 13px var(--font-body); color: var(--muted); background: var(--panel); border: 1px solid var(--line); padding: 8px 12px; }
+.bm-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.l-sight { background: #f0b03c; } .l-park { background: #5cc27a; } .l-city { background: #e8e4dc; } .l-mount { background: #6cc4e0; }
+@media (max-width: 640px) { .bm-head h2 { display: none; } .bm-legend { font-size: 11px; } }
