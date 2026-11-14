@@ -5,6 +5,7 @@ import { LEVEL_CENTER } from './world.js';
 import { City, CITY_HALF } from './city.js';
 import { LEVELS, LevelRunner } from './levels.js';
 import { Hangar, HANGAR } from './garage.js';
+import { TUNE, RIMS, tuneOf, tunedSpec, applyTune } from './tuning.js';
 
 const $ = id => document.getElementById(id);
 const fmt = n => n.toLocaleString('ru-RU');
@@ -12,7 +13,7 @@ const WHITE = COLORS[0].hex;
 
 // ---------- Сохранение ----------
 const SAVE_KEY = 'uzbcarparking-save-v2';
-const save = Object.assign({ money: 1500, owned: ['matiz'], car: 'matiz', colors: {}, stars: {}, plate: randomPlate() },
+const save = Object.assign({ money: 1500, owned: ['matiz'], car: 'matiz', colors: {}, stars: {}, plate: randomPlate(), tune: {}, bought: [], fuel: 1, damage: 0 },
   (() => { try { return JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; } catch { return {}; } })());
 if (!CARS.some(c => c.id === save.car)) save.car = 'matiz';
 save.owned = CARS.map(c => c.id);          // все машины бесплатные и сразу в гараже
@@ -139,8 +140,10 @@ addEventListener('keydown', () => audio.init());
 // ---------- Машина игрока ----------
 function rebuildPlayer() {
   if (playerMesh) scene.remove(playerMesh);
-  player.setSpec(carById(save.car));
-  playerMesh = buildCarMesh(player.spec, colorOf(save.car), save.plate);
+  const t = tuneOf(save, save.car);
+  player.setSpec(tunedSpec(carById(save.car), t, save.damage));
+  playerMesh = buildCarMesh(carById(save.car), colorOf(save.car), save.plate);
+  applyTune(playerMesh, player.spec, t);
   scene.add(playerMesh); syncMesh(playerMesh, player);
 }
 function syncMesh(mesh, v) {
@@ -217,13 +220,12 @@ function drawMinimap() {
 let mode = 'menu';              // menu | free | level | garage
 let paused = true, inRun = false;
 const playing = () => (mode === 'free' || mode === 'level') && !paused;
-const SCREENS = ['menu', 'levels', 'garage', 'result', 'loading'];
-function show(id) { for (const s of SCREENS) $(s).hidden = s !== id; $('vignette').classList.toggle('off', id !== 'menu' && id !== 'levels'); }
+const SCREENS = ['menu', 'levels', 'garage', 'result'];
+function show(id) { for (const s of SCREENS) $(s).hidden = s !== id; $('vignette').classList.toggle('off', !id); }
 let toastT;
 function toast(text, ms = 2200, bad = false) { const t = $('toast'); t.textContent = text; t.classList.toggle('bad', bad); t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); }
 function updateMoney() {
   $('money').textContent = fmt(save.money);
-  $('menu-money').textContent = fmt(save.money);
   $('garage-money').textContent = fmt(save.money);
   $('menu-car-name').textContent = carById(save.car).name;
 }
@@ -236,18 +238,14 @@ function enterPlay(m) {
   $('btn-play').querySelector('span').textContent = 'Дальше';
   updateMoney();
 }
-function openMenu() {
-  paused = true; garageSel = null; garageColor = null;
-  setScene(true);
+function openMenu() {                 // пауза — сразу в гараж
   $('hud').hidden = true; $('touch').hidden = true;
-  show('menu'); updateMoney();
+  openGarage();
 }
-function closeSheets() {
-  if (mode === 'garage') leaveGarage();
-  show('menu');
-}
+function closeSheets() { show('garage'); }
 
 function resetCar() {
+  if (mode === 'free') { save.fuel = Math.max(save.fuel, 0.25); player._dry = false; }
   if (mode === 'level') { startLevel(levels.idx); return; }
   player.reset(world.spawn.x, world.spawn.z, world.spawn.h); camHeading = player.h; updateCamera(0, true);
 }
@@ -268,9 +266,13 @@ function startLevel(i) {
   enterPlay('level');
 }
 
-$('btn-play').onclick = () => { if (inRun) enterPlay(mode === 'level' ? 'level' : 'free'); else startFree(); };
-$('btn-levels').onclick = () => { renderLevels(); show('levels'); };
-$('btn-garage').onclick = openGarage;
+// город строится в фоне; если игрок уже жмёт «Ехать» — ждём его с полоской
+let cityReady = false, afterCity = null;
+const whenCity = fn => { if (cityReady) fn(); else { afterCity = fn; $('city-wait').hidden = false; } };
+$('btn-play').onclick = () => whenCity(() => { const m = prevMode; if (inRun) enterPlay(m === 'level' ? 'level' : 'free'); else startFree(); });
+$('btn-levels').onclick = () => whenCity(() => { renderLevels(); show('levels'); });
+$('btn-start').onclick = () => { if (hangar) openGarage(); };
+$('btn-home').onclick = () => { mode = 'menu'; show('menu'); };
 $('btn-pause').onclick = openMenu;
 $('btn-credits').onclick = () => { const c = $('credits'); c.hidden = !c.hidden; };
 document.querySelectorAll('[data-close]').forEach(b => (b.onclick = closeSheets));
@@ -313,54 +315,101 @@ function finishLevel(res) {
 }
 $('res-retry').onclick = () => startLevel(levels.idx);
 $('res-next').onclick = () => startLevel(levels.idx + 1);
-$('res-menu').onclick = () => { levels.clear(); inRun = false; mode = 'menu'; $('btn-play').querySelector('span').textContent = 'Ехать'; show('menu'); };
+$('res-menu').onclick = () => { levels.clear(); inRun = false; $('btn-play').querySelector('span').textContent = 'Ехать'; openGarage(); };
 
-// гараж
-let garageSel, garageColor, garageMesh, prevMode;
-function openGarage() {
-  prevMode = mode; mode = 'garage'; paused = true;
+// гараж: машины, покраска и тюнинг; выбранная машина сразу становится твоей
+let garageSel, garageColor, garageMesh, prevMode = 'free', gTab = 'cars';
+function openGarage(tab) {
+  if (mode !== 'garage' && mode !== 'menu') prevMode = mode;
+  mode = 'garage'; paused = true; if (tab) gTab = tab;
   garageSel = save.car; garageColor = null;
+  $('hud').hidden = true; $('touch').hidden = true;
   show('garage'); previewGarage(); renderGarage();
 }
-function leaveGarage() {
-  mode = prevMode === 'garage' ? 'menu' : prevMode;
-  garageSel = null; garageColor = null;
-  hangar.setCar(buildCarMesh(carById(save.car), colorOf(save.car), save.plate));
-}
-function previewGarage() {        // машина на поворотном подиуме в ангаре
+function leaveGarage() { garageSel = null; garageColor = null; }
+function previewGarage() {        // машина на поворотном подиуме в студии
   if (!inHangar) setScene(true);
-  hangar.setCar(buildCarMesh(carById(garageSel), garageColor || colorOf(garageSel), save.plate));
+  const m = buildCarMesh(carById(save.car), colorOf(save.car), save.plate);
+  applyTune(m, carById(save.car), tuneOf(save, save.car));
+  hangar.setCar(m);
 }
+const priceTag = n => (n ? `${fmt(n)} сум` : 'бесплатно');
 function renderGarage() {
+  document.querySelectorAll('.gtabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === gTab));
+  for (const k of ['cars', 'paint', 'tune']) $('tab-' + k).hidden = k !== gTab;
   const tabs = $('car-tabs'); tabs.innerHTML = '';
   for (const c of CARS) {
-    const b = document.createElement('button'); b.className = c.id === garageSel ? 'on' : '';
-    const own = save.owned.includes(c.id);
+    const b = document.createElement('button'); b.className = c.id === save.car ? 'on' : '';
     b.innerHTML = `<span>${c.name}</span><small>${c.id === save.car ? 'за рулём' : 'бесплатно'}</small>`;
-    b.onclick = () => { garageSel = c.id; garageColor = null; previewGarage(); renderGarage(); };
+    b.onclick = () => { if (c.id === save.car) return; save.car = c.id; persist(); rebuildPlayer(); previewGarage(); renderGarage(); };
     tabs.append(b);
   }
-  const c = carById(garageSel), owned = save.owned.includes(c.id);
+  const c = carById(save.car), t = tuneOf(save, c.id), sp = tunedSpec(c, t);
   $('car-desc').textContent = c.desc;
-  $('car-specs').innerHTML = `<div><b>${Math.round(c.maxSpeed * 3.6)}</b><span>км/ч</span></div><div><b>${c.len.toFixed(1)}</b><span>длина, м</span></div><div><b>${Math.round(c.accel * 10) / 10}</b><span>разгон, м/с²</span></div>`;
-  const cl = $('color-list'); cl.innerHTML = '';
-  const cur = garageColor || colorOf(garageSel);
-  for (const col of COLORS) {
-    const b = document.createElement('button'); b.style.background = col.hex; b.title = col.name; b.setAttribute('aria-label', col.name);
-    if (col.hex === cur) b.className = 'on';
-    b.onclick = () => { save.colors[garageSel] = col.hex; persist(); garageColor = null; if (garageSel === save.car) rebuildPlayer(); previewGarage(); renderGarage(); };
-    cl.append(b);
+  $('car-specs').innerHTML = `<div><b>${Math.round(sp.maxSpeed * 3.6)}</b><span>км/ч</span></div><div><b>${c.len.toFixed(1)}</b><span>длина, м</span></div><div><b>${Math.round(sp.accel * 10) / 10}</b><span>разгон, м/с²</span></div>`;
+  const sw = (el, list, cur, set, title) => {
+    el.innerHTML = '';
+    for (const hex of list) {
+      const b = document.createElement('button'); b.style.background = hex || 'conic-gradient(#888 0 25%, #ddd 0 50%, #888 0 75%, #ddd 0)'; b.title = title(hex);
+      b.setAttribute('aria-label', title(hex)); if (hex === cur) b.className = 'on';
+      b.onclick = () => { set(hex); persist(); rebuildPlayer(); previewGarage(); renderGarage(); };
+      el.append(b);
+    }
+  };
+  sw($('color-list'), COLORS.map(x => x.hex), colorOf(c.id), hex => (save.colors[c.id] = hex), hex => COLORS.find(x => x.hex === hex).name);
+  sw($('rim-list'), RIMS, t.rims, hex => { (save.tune[c.id] ||= {}).rims = hex; }, hex => (hex ? 'Диски ' + hex : 'Заводские'));
+  const tl = $('tune-list'); tl.innerHTML = '';
+  for (const g of TUNE) {
+    const row = document.createElement('div'); row.className = 'tune-row';
+    row.innerHTML = `<div class="label">${g.name}</div>`;
+    const opts = document.createElement('div'); opts.className = 'tune-opts';
+    for (const [v, name, price] of g.opts) {
+      const id = `${c.id}:${g.key}:${v}`, have = !price || save.bought.includes(id);
+      const b = document.createElement('button'); b.className = (t[g.key] === v ? 'on' : '') + (g.key === 'glow' && v ? ' glow' : '');
+      if (g.key === 'glow' && v) b.style.setProperty('--glow', v);
+      b.innerHTML = `<span>${name}</span><small>${have ? (t[g.key] === v ? 'стоит' : 'есть') : priceTag(price)}</small>`;
+      b.onclick = () => {
+        if (!have) { if (save.money < price) { toast('Не хватает денег — пройди уровни парковки', 2400, true); return; } save.money -= price; save.bought.push(id); }
+        (save.tune[c.id] ||= {})[g.key] = v; persist(); rebuildPlayer(); previewGarage(); renderGarage();
+      };
+      opts.append(b);
+    }
+    row.append(opts); tl.append(row);
   }
-  const btn = $('btn-buy');
-  btn.textContent = c.id === save.car ? 'Поехали' : 'Выбрать'; btn.disabled = false;
+  $('play-sub').textContent = inRun ? 'Продолжить' : cityReady ? 'Открытый город' : 'Город строится…';
   updateMoney();
 }
-$('btn-buy').onclick = () => {
-  const c = carById(garageSel);
-  if (c.id !== save.car) { save.car = c.id; persist(); rebuildPlayer(); previewGarage(); renderGarage(); toast(`${c.name} — за рулём`); return; }
-  leaveGarage();
-  if (inRun) enterPlay(mode === 'level' ? 'level' : 'free'); else startFree();
+document.querySelectorAll('.gtabs button').forEach(b => (b.onclick = () => { gTab = b.dataset.tab; renderGarage(); }));
+
+// ---------- Бензин, износ и сервисы в городе ----------
+let svc = null;
+function serviceCheck(dt) {
+  const dist = Math.abs(player.speed) * dt;
+  save.fuel = Math.max(0, save.fuel - dist / 14000);
+  $('fuel-bar').style.width = save.fuel * 100 + '%'; $('fuel-bar').classList.toggle('low', save.fuel < 0.15);
+  $('hp-bar').style.width = (1 - save.damage) * 100 + '%'; $('hp-bar').classList.toggle('low', save.damage > 0.6);
+  svc = null;
+  if (mode === 'free' && Math.abs(player.speed) < 1.5) for (const z of world.services || []) if (Math.hypot(player.x - z.x, player.z - z.z) < z.r) { svc = z; break; }
+  const b = $('svc-btn');
+  if (svc) {
+    const cost = svc.type === 'gas' ? Math.ceil((1 - save.fuel) * 300) : svc.type === 'repair' ? Math.ceil(save.damage * 800) : 0;
+    b.dataset.cost = cost;
+    b.textContent = svc.type === 'gas' ? (save.fuel > 0.98 ? 'Бак полный' : `Заправить · ${fmt(cost)} сум`) : svc.type === 'repair' ? (save.damage < 0.02 ? 'Машина целая' : `Починить · ${fmt(cost)} сум`) : 'Тюнинг-ателье';
+  }
+  b.hidden = !svc;
+}
+$('svc-btn').onclick = () => {
+  if (!svc) return;
+  const cost = +$('svc-btn').dataset.cost || 0;
+  if (svc.type === 'tune') { openGarage('tune'); return; }
+  if (cost <= 0) return;
+  if (save.money < cost) { toast('Не хватает денег', 2000, true); return; }
+  save.money -= cost;
+  if (svc.type === 'gas') { save.fuel = 1; toast('Полный бак'); audio.ding(); }
+  else { save.damage = 0; rebuildPlayer(); toast('Машина как новая'); audio.ding(); }
+  persist(); updateMoney();
 };
+setInterval(persist, 5000);
 
 // ---------- Светофоры: подсказка и штраф за красный ----------
 let lastSig = null, fineCooldown = 0;
@@ -471,6 +520,13 @@ addEventListener('keydown', e => {
   else if (e.code === 'Escape' && bmOpen) { e.stopImmediatePropagation(); closeBigMap(); }
 }, true);
 
+// ---------- Гараж: крутим машину мышкой или пальцем ----------
+let dragA = 0, dragT = -10, dragX = null;
+$('game').addEventListener('pointerdown', e => { if (mode === 'garage') { dragX = e.clientX; $('game').setPointerCapture(e.pointerId); } });
+$('game').addEventListener('pointermove', e => { if (dragX === null) return; dragA -= (e.clientX - dragX) * 0.006; dragX = e.clientX; dragT = t; });
+const dragEnd = () => { dragX = null; };
+$('game').addEventListener('pointerup', dragEnd); $('game').addEventListener('pointercancel', dragEnd);
+
 // ---------- Цикл ----------
 const clock = new THREE.Clock();
 let t = 0, orbit = 0;
@@ -484,7 +540,10 @@ function frame() {
     const Y = player.y || 0, hAt = (x, z) => world.surfaceAt(x, z, Y);
     const yF = hAt(player.x + hx * hl, player.z + hz * hl), yB = hAt(player.x - hx * hl, player.z - hz * hl);
     player.grade = (yF - yB) / player.spec.len;
-    const hit = player.update(dt, input, world.obstacles, CITY_HALF);
+    const noFuel = mode === 'free' && save.fuel <= 0;
+    const hit = player.update(dt, noFuel ? { ...input, up: false } : input, world.obstacles, CITY_HALF);
+    if (mode === 'free' && hit > 3) { save.damage = Math.min(1, save.damage + (hit - 3) * 0.012); if (save.damage > 0.6 && !player._slowed) { player._slowed = true; player.setSpec(tunedSpec(carById(save.car), tuneOf(save, save.car), save.damage)); toast('Машина повреждена — заедь в автосервис', 3000, true); } }
+    if (noFuel && !player._dry) { player._dry = true; toast('Бензин кончился — R вернёт на старт с запасом', 3500, true); }
     const yN = world.surfaceAt(player.x, player.z, Y);
     player.vy = yN < Y - 0.4 ? (player.vy || 0) - 9.81 * dt : 0;          // падение с края — с ускорением
     player.y = player.vy ? Math.max(yN, Y + player.vy * dt) : yN;
@@ -509,10 +568,11 @@ function frame() {
     $('gear').textContent = player.speed < -0.2 ? 'R' : Math.abs(player.speed) < 0.2 ? 'N' : 'D';
     drawMinimap();
     trafficCheck(dt);
+    if (mode === 'free') serviceCheck(dt); else $('svc-btn').hidden = true;
   } else if (hangar && inHangar) {
-    orbit += dt;
+    if (t - dragT > 2.5) orbit += dt;           // сам крутится, пока не трогают
     hangar.update(dt);
-    hangar.camera(camera, mode === 'garage' ? 'garage' : 'menu', orbit, innerWidth > 720);
+    hangar.camera(camera, mode === 'garage' ? 'garage' : 'menu', orbit + dragA / 0.16, innerWidth > 720);
   }
   if (world) world.updateSignals(t);
   audio.update(player ? player.speed : 0, input.up || input.down, input.horn, playing());
@@ -524,31 +584,26 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
-// ---------- Запуск ----------
+// ---------- Запуск: заставка сразу, гараж после загрузки машин, город строится в фоне ----------
 (async function boot() {
-  show('loading');
-  $('load-bar').style.width = '15%';
-  await loadCarModels();
-  $('load-bar').style.width = '55%'; $('load-text').textContent = 'Строим город…';
-  await nextFrame();
-  world = new City(scene);
-  $('load-bar').style.width = '75%';
-  levels = new LevelRunner(scene, world.obstacles);
-  $('load-bar').style.width = '90%'; $('load-text').textContent = 'Открываем гараж…';
-  await nextFrame();
-  hangar = new Hangar(scene);
-  player = new Vehicle(carById(save.car));
-  player.reset(world.spawn.x, world.spawn.z, world.spawn.h); camHeading = player.h;
-  rebuildPlayer();
-  drawMapBase();
+  show('menu'); $('btn-start').classList.add('wait');
   $('credits').textContent = CREDITS.join(' · ');
-  $('load-bar').style.width = '100%';
-  await nextFrame();
-  updateMoney();
-  $('btn-play').classList.add('first');
-  document.querySelectorAll('.nav-item').forEach(b => b.addEventListener('mouseenter', () => $('btn-play').classList.toggle('first', b.id === 'btn-play')));
-  show('menu');
-  setScene(true);
   requestAnimationFrame(frame);
+  await loadCarModels();
+  hangar = new Hangar(scene);
+  world = new City(scene);
+  levels = new LevelRunner(scene, world.obstacles);
+  player = new Vehicle(carById(save.car));
+  rebuildPlayer();
+  setScene(true);
+  updateMoney();
+  $('btn-start').classList.remove('wait');
   window.__game = { player, world, levels, save, startLevel, startFree, input, camera, hangar };
+  await world.buildAsync(p => { $('title-bar').style.width = $('load-bar').style.width = Math.round(p * 100) + '%'; });
+  player.reset(world.spawn.x, world.spawn.z, world.spawn.h); camHeading = player.h;
+  drawMapBase();
+  cityReady = true; $('title-progress').classList.add('done');
+  if (mode === 'garage') renderGarage();
+  $('city-wait').hidden = true;
+  if (afterCity) { const f = afterCity; afterCity = null; f(); }
 })();

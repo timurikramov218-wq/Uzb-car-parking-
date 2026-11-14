@@ -355,8 +355,7 @@ export class World {
     this.batches = new Map(); this.carBuckets = new Map();
     this.trees = []; this.lamps = []; this.labels = [];
     makeTextures(); makeMaterials(); makeSignalMaterials(this);
-    this.generate();
-    this.finish();
+    if (!new.target.lazy) { this.generate(); this.finish(); }     // город строится позже, по частям
   }
   generate() { this.ground(); this.roads(); this.ringAndSquare(); this.canal(); this.cells(); this.mountains(); }
 
@@ -736,13 +735,13 @@ export class World {
     const inner = laneHalf > 10 ? 2.2 : 0.3, outer = laneHalf - 0.4, mid = (inner + outer) / 2;
     const at = (back, u) => [cx - dx * back + rx * u, cz - dz * back + rz * u];
     const [slx, slz] = at(crossHalf + (opts.stop || 11), mid);
-    if (opts.grp) this.quad(M.mark, slx, 0.066, slz, outer - inner, 0.5, face, 1, 1);
+    if (opts.grp) this.quad(M.mark, slx, 0.066 + (opts.y || 0), slz, outer - inner, 0.5, face, 1, 1);
     else this.quad(M.mark, slx, 0.066, slz, dz ? outer - inner : 0.5, dz ? 0.5 : outer - inner, 0, 1, 1);
     const lanes = laneHalf > 10 ? 3 : 2, lw = (outer - inner) / lanes;
     for (let i = 0; i < lanes; i++) {
       const mat = i === 0 ? M.arrowSL : i === lanes - 1 ? M.arrowSR : M.arrowS;
       const [ax, az] = at(crossHalf + (opts.arrow || 19), inner + lw * (i + 0.5));
-      this.quad(mat, ax, 0.067, az, 1.3, 5, face, 1, 1);
+      this.quad(mat, ax, 0.067 + (opts.y || 0), az, 1.3, 5, face, 1, 1);
     }
   }
 

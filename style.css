@@ -221,3 +221,66 @@ h2 { font: 800 24px/1.1 var(--font-display); margin: 0; letter-spacing: -0.01em;
   .bm-legend { font-size: 11px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+/* заставка: появляется сразу */
+.title { display: grid; grid-template-rows: 1fr auto; justify-items: center; background: radial-gradient(70% 60% at 50% 42%, rgba(30,44,78,0.55), rgba(8,10,14,0.85)); }
+.title-box { align-self: center; display: grid; justify-items: center; gap: 18px; text-align: center; }
+.brand.huge { font-size: clamp(30px, 6.5vw, 60px); gap: 16px; letter-spacing: -0.01em; }
+.brand.huge .mark { width: clamp(44px, 7vw, 66px); height: clamp(44px, 7vw, 66px); border-radius: 18px; }
+.brand.huge .mark::after { width: 40%; height: 40%; border-width: 5px; }
+.tagline { margin: 0; color: rgba(255,255,255,0.72); font: 500 15px var(--font-body); letter-spacing: 0.04em; }
+.start { margin-top: 10px; min-width: 240px; height: 66px; border-radius: 999px; background: linear-gradient(180deg, #4b80ff, var(--accent)); color: #fff; font: 900 26px var(--font-display); letter-spacing: 0.02em;
+  box-shadow: 0 10px 30px rgba(47,107,255,0.5); transition: transform .12s, filter .15s; animation: pulse 2.2s ease-in-out infinite; }
+.start:hover { filter: brightness(1.08); }
+.start:active { transform: scale(0.97); }
+.start.wait { opacity: 0.55; animation: none; cursor: progress; }
+.start.wait span::after { content: " …"; }
+@keyframes pulse { 0%, 100% { box-shadow: 0 10px 30px rgba(47,107,255,0.45); } 50% { box-shadow: 0 10px 44px rgba(47,107,255,0.8); } }
+.title-progress { width: 200px; height: 4px; border-radius: 99px; background: rgba(255,255,255,0.12); overflow: hidden; transition: opacity .4s; }
+.title-progress i { display: block; height: 100%; width: 0; background: rgba(255,255,255,0.6); transition: width .3s; }
+.title-progress.done { opacity: 0; }
+
+/* гараж: панель справа, имя машины и док снизу, остальное — 3D (можно крутить) */
+.garage-screen { pointer-events: none; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto 1fr auto auto; gap: 14px; }
+.garage-screen > * { pointer-events: auto; }
+.garage-screen .topbar { grid-column: 1 / -1; }
+.round { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--glass); box-shadow: var(--shadow); color: var(--ink); }
+.gpanel { grid-column: 2; grid-row: 2 / 5; align-self: start; width: min(380px, 100%); max-height: 100%; overflow: auto; background: var(--glass); backdrop-filter: blur(16px); border-radius: 24px; box-shadow: var(--shadow); padding: 16px; display: grid; gap: 14px; }
+.gtabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 14px; background: var(--fill); }
+.gtabs button { height: 38px; border-radius: 10px; font: 700 14px var(--font-display); color: var(--ink-2); }
+.gtabs button.on { background: #fff; color: var(--ink); box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+.gtab { display: grid; gap: 14px; align-content: start; }
+.gname { grid-column: 1; grid-row: 3; justify-self: center; display: grid; justify-items: center; color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,0.5); pointer-events: none !important; }
+.gname small { font: 600 12px var(--font-body); opacity: 0.7; }
+.gname b { font: 900 clamp(32px, 5vw, 52px)/1 var(--font-display); letter-spacing: -0.02em; }
+.garage-screen .dock { grid-column: 1; grid-row: 4; justify-self: center; }
+.tune-list { display: grid; gap: 14px; }
+.tune-row { display: grid; gap: 8px; }
+.tune-row .label { margin: 0; }
+.tune-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.tune-opts button { display: grid; text-align: left; padding: 8px 10px; border-radius: 12px; background: var(--fill); border: 2px solid transparent; }
+.tune-opts button span { font: 700 13px var(--font-display); }
+.tune-opts button small { font-size: 11px; color: var(--ink-3); }
+.tune-opts button.on { background: var(--accent-soft); border-color: var(--accent); }
+.tune-opts button.glow span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--glow); box-shadow: 0 0 8px var(--glow); margin-right: 6px; }
+.city-wait { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 40; display: grid; justify-items: center; gap: 12px; background: var(--glass); border-radius: 20px; box-shadow: var(--shadow); padding: 20px 26px; font: 700 16px var(--font-display); }
+.city-wait .bar { background: var(--fill); }
+
+/* бензин и состояние, кнопка сервиса */
+.hud-gauges { right: max(14px, env(safe-area-inset-right)); top: max(114px, calc(env(safe-area-inset-top) + 114px)); display: grid; gap: 6px; background: var(--glass); box-shadow: var(--shadow); border-radius: 14px; padding: 8px 10px; }
+.gauge { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.gauge svg { width: 16px; height: 16px; }
+.gbar { width: 84px; height: 6px; border-radius: 99px; background: var(--fill); overflow: hidden; }
+.gbar em { display: block; height: 100%; width: 100%; border-radius: 99px; background: var(--ok); transition: width .3s; }
+.gbar em.low { background: var(--bad); }
+.svc-btn { left: 50%; bottom: max(150px, calc(env(safe-area-inset-bottom) + 150px)); transform: translateX(-50%); height: 54px; padding: 0 26px; border-radius: 999px; pointer-events: auto;
+  background: linear-gradient(180deg, #4b80ff, var(--accent)); color: #fff; font: 800 17px var(--font-display); box-shadow: 0 8px 22px rgba(47,107,255,0.5); }
+@media (max-width: 720px) {
+  .garage-screen { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto auto auto; }
+  .gpanel { grid-column: 1; grid-row: 4; width: 100%; max-height: 38vh; padding: 12px; }
+  .gname { grid-row: 3; }
+  .garage-screen .dock { grid-row: 5; }
+  .hud-gauges { top: auto; bottom: max(124px, calc(env(safe-area-inset-bottom) + 124px)); padding: 6px 8px; }
+  .gbar { width: 60px; }
+  .svc-btn { bottom: max(230px, calc(env(safe-area-inset-bottom) + 230px)); }
+}
+.gtabs { position: sticky; top: -16px; z-index: 2; box-shadow: 0 6px 12px rgba(238,241,245,0.9); }

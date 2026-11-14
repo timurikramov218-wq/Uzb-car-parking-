@@ -124,18 +124,43 @@ function cHull(pts) {                 // выпуклая оболочка (мо
 }
 
 export class City extends World {
-  generate() {
-    this.isCity = true;
-    this.cityTextures();
-    this.riverHash = new SegHash(60); this.riverHash.addPoly(RIVER, { river: true });
-    this.planNetwork();
-    this.buildTerrain();
-    this.buildRoads();
-    this.buildPlaces();
-    this.fillLots();
-    this.scatter();
-    this.signals();
-    this.spawnPoint();
+  static lazy = true;
+  // стройка по кусочкам по ~14 мс, чтобы гараж не замирал
+  async buildAsync(onProgress) {
+    const q = [];
+    q.push(() => { this.isCity = true; this.services = []; this.cityTextures(); this.riverHash = new SegHash(60); this.riverHash.addPoly(RIVER, { river: true }); });
+    q.push(() => this.planNetwork());
+    q.push(() => this.buildTerrain());
+    q.push(() => {
+      this.deckHash = new SegHash(30); this.roadHash = new SegHash(40);
+      for (const e of this.edges) this.roadHash.addPoly(e.P, { e, hw: e.hw + e.sw });
+      const bridges = this.edges.filter(e => e.kind === 'bridge').sort((a, b) => (b.span[1] - b.span[0]) - (a.span[1] - a.span[0]));
+      bridges.forEach((e, i) => (e.style = i === 0 ? 'cable' : i === 1 ? 'arch' : 'girder'));
+      for (const e of this.edges) q.push(() => this.buildEdge(e));
+      for (const n of this.nodes) q.push(() => this.buildJunction(n));
+      q.push(() => this.buildPlaces());
+      q.push(() => {
+        this.lots = []; this.lotGrid = new SegHash(60); this.lotCount = { gas: 0, service: 0, tune: 0 };
+        for (const e of this.edges.filter(e => e.kind === 'ground' || e.kind === 'bridge').sort(() => rnd() - 0.5)) q.push(() => this.lotsAlong(e));
+        q.push(() => this.scatter());
+        q.push(() => {          // въезды в сервисы и на заправки свободны: убираем деревья и фонари перед ними
+          const keep = o => !this.services.some(z => { for (let k = 0; k <= 4; k++) { const px = z.x + z.nx * k * 5, pz = z.z + z.nz * k * 5; if (Math.hypot(o.x - px, o.z - pz) < 9) return true; } return false; });
+          this.trees = this.trees.filter(keep); this.lamps = this.lamps.filter(keep);
+        });
+        q.push(() => this.furniture());
+        q.push(() => this.signals());
+        q.push(() => this.spawnPoint());
+        q.push(() => this.finish());
+      });
+    });
+    let done = 0;
+    while (q.length) {
+      const t0 = performance.now();
+      while (q.length && performance.now() - t0 < 14) { q.shift()(); done++; }
+      onProgress?.(done / (done + q.length));
+      await new Promise(r => setTimeout(r, 0));
+    }
+    this.ready = true;
   }
 
   // ---------- текстуры дорог с разметкой ----------
@@ -152,12 +177,12 @@ export class City extends World {
         }
       });
       t.wrapS = THREE.ClampToEdgeWrapping;
-      return new THREE.MeshStandardMaterial({ map: t, roughness: 0.92, normalMap: normalFrom(T.asphalt, 2) });
+      return new THREE.MeshStandardMaterial({ map: t, roughness: 0.92, normalMap: normalFrom(T.asphalt, 2), polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
     };
     M.rMain = road(15, [[0.35, 'solid'], [3.95, 'dash'], [7.5, 'double'], [11.05, 'dash'], [14.65, 'solid']]);
     M.rStreet = road(9, [[0.3, 'solid'], [4.5, 'dash'], [8.7, 'solid']]);
     M.rHwy = road(10, [[0.5, 'solid'], [4.5, 'dash'], [9.4, 'solid']]);
-    M.jAsph = new THREE.MeshStandardMaterial({ map: T.asphalt, roughness: 0.92, normalMap: normalFrom(T.asphalt, 2), polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    M.jAsph = new THREE.MeshStandardMaterial({ map: T.asphalt, roughness: 0.92, normalMap: normalFrom(T.asphalt, 2), polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 });
     M.walk = new THREE.MeshStandardMaterial({ map: T.sidewalk, roughness: 0.9 });
     M.bridgeC = new THREE.MeshStandardMaterial({ color: 0xc4bfb4, roughness: 0.85 });
     M.bridgeDark = new THREE.MeshStandardMaterial({ color: 0x8d8981, roughness: 0.9, side: THREE.DoubleSide });
@@ -425,16 +450,14 @@ export class City extends World {
     }
   }
   roadRot(p) { return Math.atan2(-p.tz, p.tx); }
+  // точка на чужой проезжей части или внутри перекрёстка — там не ставим деревья и фонари
+  blockedFor(x, z, self) {
+    for (const sg of this.roadHash.near(x, z, 20)) { const e = sg.data.e; if (e === self) continue; if (cSegDist(x, z, sg.ax, sg.az, sg.bx, sg.bz).d < e.hw + 1) return true; }
+    for (const n of [self.a, self.b]) if (Math.hypot(x - n.x, z - n.z) < n.R + 2) return true;
+    return false;
+  }
 
   // ---------- дороги, тротуары, мосты, эстакада, тоннель ----------
-  buildRoads() {
-    this.deckHash = new SegHash(30); this.roadHash = new SegHash(40);
-    for (const e of this.edges) this.roadHash.addPoly(e.P, { e, hw: e.hw + e.sw });
-    const bridges = this.edges.filter(e => e.kind === 'bridge').sort((a, b) => (b.span[1] - b.span[0]) - (a.span[1] - a.span[0]));
-    bridges.forEach((e, i) => (e.style = i === 0 ? 'cable' : i === 1 ? 'arch' : 'girder'));
-    for (const e of this.edges) this.buildEdge(e);
-    for (const n of this.nodes) this.buildJunction(n);
-  }
 
   buildEdge(e) {
     const P = e.P, sa = e.a.R, sb = P.len - e.b.R, y = s => e.prof(s), D = district((e.a.x + e.b.x) / 2, (e.a.z + e.b.z) / 2);
@@ -442,28 +465,30 @@ export class City extends World {
     if (deck) this.deckHash.addPoly(P, { hw: hwT + 0.3 }, 0, P.len), this.deckHash.m.forEach(a => a.forEach(sg => { if (sg.data.h0 === undefined) { sg.data.h0 = y(sg.data.s0); sg.data.h1 = y(sg.data.s1); } }));
     if (e.kind === 'hwy') return this.buildExpress(e, sa, sb);
     // полотно и тротуары с бордюром
-    this.ribbon(e.type === 'main' ? M.rMain : M.rStreet, P, sa, sb, -e.hw, e.hw, s => y(s) + 0.05);
+    this.ribbon(e.type === 'main' ? M.rMain : M.rStreet, P, sa, sb, -e.hw, e.hw, s => y(s) + 0.06);
     for (const sd of [-1, 1]) {
-      this.ribbon(M.walk, P, sa, sb, sd * e.hw, sd * hwT, s => y(s) + 0.17, { uS: 0.25, vS: 0.25 });
-      this.wallStrip(M.curb, P, sa, sb, sd * e.hw, s => y(s) + 0.02, s => y(s) + 0.17);
+      this.ribbon(M.walk, P, sa - 1, sb + 1, sd * (e.hw - 0.1), sd * hwT, s => y(s) + 0.035, { uS: 0.25, vS: 0.25 });
+      
     }
     // фонари и деревья на тротуарах
     if (e.kind !== 'tunnel') {
       for (let s = sa + 10, k = 0; s < sb - 6; s += 30, k++) {
         const sd = k % 2 ? 1 : -1, p = cAt(P, s), l = sd * (hwT - 0.5);
+        if (this.blockedFor(p.x - p.tz * l, p.z + p.tx * l, e)) continue;
         this.lamps.push({ x: p.x - p.tz * l, z: p.z + p.tx * l, a: Math.atan2(sd * p.tx, sd * p.tz), y: y(s) });
       }
       const treeStep = D.kind === 'down' ? 22 : D.kind === 'ind' ? 40 : 13;
       if (e.kind === 'ground') for (let s = sa + 16; s < sb - 10; s += treeStep) for (const sd of [-1, 1]) {
         if (Math.abs(((s - sa - 10) % 30) - 15) > 13) continue;
         const p = cAt(P, s), l = sd * (hwT - 1.3);
+        if (this.blockedFor(p.x - p.tz * l, p.z + p.tx * l, e)) continue;
         this.trees.push({ x: p.x - p.tz * l, z: p.z + p.tx * l, s: rr(0.75, 1.05), kind: D.kind === 'sub' ? pick(['chinar', 'thin', 'fruit']) : pick(['chinar', 'thin', 'poplar']) });
       }
     }
     // зебры у перекрёстков
     for (const [n, s] of [[e.a, sa + 2.2], [e.b, sb - 2.2]]) {
       if (n.e.length < 3 || sb - sa < 14) continue;
-      const p = cAt(P, s); this.quad(M.zebra, p.x, y(s) + 0.07, p.z, e.hw * 2 - 0.6, 3, Math.atan2(-p.tx, -p.tz), 1, 1);
+      const p = cAt(P, s); this.quad(M.zebra, p.x, y(s) + 0.085, p.z, e.hw * 2 - 0.6, 3, Math.atan2(-p.tx, -p.tz), 1, 1);
     }
     if (e.kind === 'bridge') this.buildBridge(e, hwT);
     if (e.kind === 'tunnel') this.buildTunnel(e, hwT);
@@ -474,7 +499,7 @@ export class City extends World {
     this.ribbon(M.bridgeDark, P, a0, a1, -hwT - 0.4, hwT + 0.4, s => y(s) - 1.1, { down: true, uS: 0.2, vS: 0.2 });
     for (const sd of [-1, 1]) {
       this.wallStrip(M.bridgeC, P, a0, a1, sd * (hwT + 0.4), s => y(s) - 1.1, s => y(s) + 0.6);
-      this.wallStrip(M.bridgeC, P, a0, a1, sd * (hwT + 0.1), s => y(s) + 0.17, s => y(s) + 0.6);
+      this.wallStrip(M.bridgeC, P, a0, a1, sd * (hwT + 0.1), s => y(s) + 0.035, s => y(s) + 0.6);
       for (let s = a0; s < a1; s += 2.5) { const p = cAt(P, s), l = sd * (hwT + 0.25); this.geo(M.steel, new THREE.BoxGeometry(0.08, 0.6, 0.08), p.x - p.tz * l, y(s) + 0.9, p.z + p.tx * l); }
       this.ribbon(M.steel, P, a0, a1, sd * (hwT + 0.18), sd * (hwT + 0.32), s => y(s) + 1.22);
       // перила: машине не упасть в реку; на подходах — стенка до земли
@@ -582,11 +607,11 @@ export class City extends World {
 
   buildJunction(n) {
     const list = n.dirs; if (!list.length) return;
-    const y = 0.055;
+    const y = 0.065;
     if (list.length === 1) {               // тупик: разворотный круг
       const e = list[0].e, r = e.hw + 3;
       this.geo(M.jAsph, uvs(new THREE.CircleGeometry(r, 28).rotateX(-Math.PI / 2), r / 6, r / 6), n.x, y, n.z);
-      this.geo(M.walk, uvs(new THREE.RingGeometry(r, r + SWK, 28).rotateX(-Math.PI / 2), r / 2, r / 2), n.x, 0.17, n.z);
+      this.geo(M.walk, uvs(new THREE.RingGeometry(r - 0.2, r + SWK, 28).rotateX(-Math.PI / 2), r / 2, r / 2), n.x, 0.035, n.z);
       return;
     }
     const pts = w => { const out = []; for (const l of list) { const cx = n.x + Math.cos(l.a) * n.R, cz = n.z + Math.sin(l.a) * n.R, px = -Math.sin(l.a), pz = Math.cos(l.a), hw = l.e.hw + w; out.push([cx + px * hw, cz + pz * hw], [cx - px * hw, cz - pz * hw]); } return cHull(out); };
@@ -594,7 +619,7 @@ export class City extends World {
     const shape = h => new THREE.Shape(h.map(([x, z]) => new THREE.Vector2(x, -z)));
     const ag = new THREE.ShapeGeometry(shape(inner)); ag.rotateX(-Math.PI / 2); uvs(ag, 1 / 12, 1 / 12); ag.translate(0, y, 0); this.push(M.jAsph, ag);
     const os = shape(outer); os.holes.push(new THREE.Path(inner.map(([x, z]) => new THREE.Vector2(x, -z)).reverse()));
-    const sg = new THREE.ShapeGeometry(os); sg.rotateX(-Math.PI / 2); uvs(sg, 1 / 4, 1 / 4); sg.translate(0, 0.17, 0); this.push(M.walk, sg);
+    const sg = new THREE.ShapeGeometry(os); sg.rotateX(-Math.PI / 2); uvs(sg, 1 / 4, 1 / 4); sg.translate(0, 0.035, 0); this.push(M.walk, sg);
   }
 
 
@@ -705,40 +730,35 @@ export class City extends World {
   }
   addLot(x, z, w, d, rot) { const o = { x, z, h: rot, hl: w / 2, hw: d / 2 }; this.lotGrid.add(x, z, x, z, o); this.lots.push(o); }
 
-  fillLots() {
-    this.lots = []; this.lotGrid = new SegHash(60);
-    // крупные места и автодром — тоже заняты
-    let gas = 0;
-    const edges = this.edges.filter(e => e.kind === 'ground' || e.kind === 'bridge').sort(() => rnd() - 0.5);
-    for (const e of edges) {
-      const P = e.P, sa = e.a.R + 6, sb = P.len - e.b.R - 6, hwT = e.hw + e.sw;
-      for (const sd of [-1, 1]) {
-        let s = sa + rr(0, 6);
-        while (s < sb - 8) {
-          const p = cAt(P, s), D = district(p.x, p.z), kind = this.lotKind(D, e, gas);
-          const { w, d, back } = kind;
-          if (s + w > sb) break;
-          const pm = cAt(P, s + w / 2), off = hwT + back + d / 2, nx = -pm.tz * sd, nz = pm.tx * sd;
-          const x = pm.x + nx * off, z = pm.z + nz * off, rot = this.roadRot(pm);
-          if (this.lotFree(x, z, w, d, rot)) {
-            this.addLot(x, z, w, d, rot);
-            if (kind.type === 'gas') gas++;
-            this.buildLot(kind, x, z, w, d, rot, -sd, D, e);
-            // второй ряд в плотных районах
-            if ((D.kind === 'down' || D.kind === 'mid' || D.kind === 'old') && kind.type !== 'parking' && kind.type !== 'gas') {
-              const k2 = this.lotKind(D, null, 99), off2 = off + d / 2 + 10 + k2.d / 2, x2 = pm.x + nx * off2, z2 = pm.z + nz * off2;
-              if (k2.w <= w + 10 && this.lotFree(x2, z2, k2.w, k2.d, rot)) { this.addLot(x2, z2, k2.w, k2.d, rot); this.buildLot(k2, x2, z2, k2.w, k2.d, rot, -sd, D, null); }
-            }
-            s += w + rr(3, 9);
-          } else s += 7;
-        }
+  lotsAlong(e) {
+    const P = e.P, sa = e.a.R + 6, sb = P.len - e.b.R - 6, hwT = e.hw + e.sw;
+    for (const sd of [-1, 1]) {
+      let s = sa + rr(0, 6);
+      while (s < sb - 8) {
+        const p = cAt(P, s), D = district(p.x, p.z), kind = this.lotKind(D, e);
+        const { w, d, back } = kind;
+        if (s + w > sb) break;
+        const pm = cAt(P, s + w / 2), off = hwT + back + d / 2, nx = -pm.tz * sd, nz = pm.tx * sd;
+        const x = pm.x + nx * off, z = pm.z + nz * off, rot = this.roadRot(pm);
+        if (this.lotFree(x, z, w, d, rot)) {
+          this.addLot(x, z, w, d, rot);
+          if (this.lotCount[kind.type] !== undefined) this.lotCount[kind.type]++;
+          this.buildLot(kind, x, z, w, d, rot, -sd, D, e);
+          if ((D.kind === 'down' || D.kind === 'mid' || D.kind === 'old') && ['tower', 'mid', 'house'].includes(kind.type)) {   // второй ряд
+            const k2 = this.lotKind(D, null), off2 = off + d / 2 + 10 + k2.d / 2, x2 = pm.x + nx * off2, z2 = pm.z + nz * off2;
+            if (k2.w <= w + 10 && this.lotFree(x2, z2, k2.w, k2.d, rot)) { this.addLot(x2, z2, k2.w, k2.d, rot); this.buildLot(k2, x2, z2, k2.w, k2.d, rot, -sd, D, null); }
+          }
+          s += w + rr(3, 9);
+        } else s += 7;
       }
     }
   }
 
-  lotKind(D, e, gas) {
-    const main = e && e.type === 'main', r = rnd();
-    if (main && gas < 7 && r < 0.035) return { type: 'gas', w: 38, d: 30, back: 2 };
+  lotKind(D, e) {
+    const main = e && e.type === 'main', r = rnd(), C = this.lotCount;
+    if (main && C.gas < 9 && r < 0.07) return { type: 'gas', w: 34, d: 26, back: 4 };
+    if (main && C.service < 6 && r > 0.07 && r < 0.1 && D.kind !== 'down') return { type: 'service', w: 30, d: 22, back: 4 };
+    if (main && C.tune < 3 && r > 0.1 && r < 0.115) return { type: 'tune', w: 30, d: 22, back: 4 };
     if (e && r > 0.965) return { type: 'parking', w: rr(30, 50), d: rr(20, 34), back: 1 };
     switch (D.kind) {
       case 'down':
@@ -764,16 +784,17 @@ export class City extends World {
     const c = Math.cos(rot), s = Math.sin(rot), P = (lx, lz) => [x + c * lx + s * lz, z - s * lx + c * lz];
     switch (k.type) {
       case 'tower': {
+        const shopsHere = () => { const part = (m, g, lx, ly, lz, ry = 0) => { g.rotateY(ry); g.translate(lx, ly, lz); g.rotateY(rot); g.translate(x, 0, z); this.push(m, g); }; this.korzinkaFront(part, true, face, w, d); };
         this.quad(M.plaza, x, 0.03, z, w + 8, d + 8, rot, (w + 8) / 8, (d + 8) / 8);
         if (rnd() < 0.5) {             // стилобат с магазинами и башня поменьше
           this.building(x, z, w, d, 2, M.shopGlass, rot, M.roofDark, 4.5);
           const [tx, tz] = P(rr(-w * 0.15, w * 0.15), 0); this.building(tx, tz, w * 0.62, d * 0.7, k.fl, k.mat, rot, M.roofDark, 3.4, {});
-          this.box(M.roofDark, tx, 9, tz, w * 0.62 + 0.1, 0.01, d * 0.7 + 0.1, rot);
-        } else this.building(x, z, w, d, k.fl, k.mat, rot, M.roofDark, 3.4, { face, shops: w >= d && rnd() < 0.5 });
+          shopsHere();
+        } else { this.building(x, z, w, d, k.fl, k.mat, rot, M.roofDark, 3.4, { face }); if (rnd() < 0.8) shopsHere(); }
         break;
       }
       case 'mid':
-        this.building(x, z, w, d, k.fl, k.mat, rot, M.roof, 3, { face, shops: !!k.shops });
+        this.building(x, z, w, d, k.fl, k.mat, rot, M.roof, 3, { face, shops: !!k.shops || (e && D.kind !== 'sub' && rnd() < 0.7) });
         if (rnd() < 0.5) { const [tx, tz] = P(rr(-w / 3, w / 3), -face * (d / 2 + 6)); this.trees.push({ x: tx, z: tz, s: rr(0.8, 1.2), kind: 'chinar' }); }
         break;
       case 'shop': {
@@ -801,6 +822,8 @@ export class City extends World {
         this.fenceRot(x, z, w, d, rot, face);
         break;
       case 'gas': this.gasStation(x, z, w, d, rot, face); break;
+      case 'service': this.serviceShop(x, z, w, d, rot, face, false); break;
+      case 'tune': this.serviceShop(x, z, w, d, rot, face, true); break;
       case 'parking': this.parkingLot(x, z, rot, w, d); break;
     }
   }
@@ -847,6 +870,7 @@ export class City extends World {
     const [bx, bz] = P(0, -face * (d / 2 - 6)); this.building(bx, bz, 18, 9, 1, M.kWall, rot, M.green, 3.4);
     const [sx, sz] = P(w / 2 - 2, face * (d / 2 - 2)); this.box(M.darkSteel, sx, 0, sz, 0.4, 7, 0.4, rot); this.box(M.green, sx, 7, sz, 3, 3, 0.5, rot);
     this.labels.push({ x, z, text: 'АЗС', small: true });
+    const [zx, zz] = P(0, face * 3); this.services.push({ type: 'gas', x: zx, z: zz, r: 9, nx: face * s, nz: face * c });
   }
 
   // деревья в пустых местах, сосны на холме
@@ -874,7 +898,7 @@ export class City extends World {
         const grp = Math.abs(Math.sin(l.a - a0)) < 0.7 ? 'NS' : 'EW'; n.grp.set(l.e, grp);
         if (l.e.kind !== 'ground' && l.e.kind !== 'bridge') continue;
         const dx = -Math.cos(l.a), dz = -Math.sin(l.a);
-        this.signal(n.x, n.z, dx, dz, l.e.hw, n.R - 2.5, { grp, stop: 7, arrow: 15 });
+        this.signal(n.x, n.z, dx, dz, l.e.hw, n.R - 2.5, { grp, stop: 7, arrow: 15, y: 0.02 });
       }
       this.sigNodes.push(n);
     }
@@ -908,6 +932,127 @@ export class City extends World {
     const pool = CARS.filter(c => c.lod).flatMap(c => Array(c.parked || 1).fill(c)), spec = pick(pool);
     const col = rnd() < 0.7 ? '#f4f4f2' : pick(['#b9bdc3', '#50555c', '#16171a', '#7a1f2b', '#1f3f7a']);
     this.obstacles.add(addCarToBuckets(spec, col, x, z, h, this.carBuckets));
+  }
+
+  // ---------- автосервис и тюнинг-ателье: можно заехать внутрь ----------
+  serviceShop(x, z, w, d, rot, face, tune) {
+    const c = Math.cos(rot), s = Math.sin(rot), P = (lx, lz) => [x + c * lx + s * lz, z - s * lx + c * lz];
+    const wall = M.kWall, H = 6.4, DH = 4.6;
+    const wb = (lx0, lx1, lz0, lz1, y0, y1, mat = wall, col = true) => { const [bx, bz] = P((lx0 + lx1) / 2, (lz0 + lz1) / 2); this.box(mat, bx, y0, bz, Math.abs(lx1 - lx0), y1 - y0, Math.abs(lz1 - lz0), rot, col); };
+    const fz = face * d / 2;
+    wb(-w / 2, w / 2, -fz - 0.2, -fz + 0.2, 0, H);                                  // задняя стена
+    for (const sx of [-1, 1]) wb(sx * w / 2 - 0.2, sx * w / 2 + 0.2, -d / 2, d / 2, 0, H);
+    for (const [a, b] of [[-w / 2, -w / 4 - 3.4], [-w / 4 + 3.4, w / 4 - 3.4], [w / 4 + 3.4, w / 2]]) wb(a, b, fz - 0.2, fz + 0.2, 0, H);
+    wb(-w / 2, w / 2, fz - 0.2, fz + 0.2, DH, H, wall, false);                       // перемычка над воротами
+    const [rx, rz] = P(0, 0); this.box(M.roofDark, rx, H, rz, w + 0.6, 0.4, d + 0.6, rot);
+    const [fx, fz2] = P(0, 0); this.quad(M.concrete, fx, 0.05, fz2, w - 0.4, d - 0.4, rot, w / 6, d / 6);
+    const [ax, az] = P(0, face * (d / 2 + 5)); this.quad(M.asphalt, ax, 0.045, az, w, 10, rot, w / 12, 1);
+    // внутри: световые полосы, подъёмник, стеллажи
+    const ledM = tune ? M.archRed : M.lightOn;
+    for (const lz of [-d / 4, d / 4]) { const [lx2, lz2] = P(0, lz); this.box(tune ? M.green : M.lightOn, lx2, H - 0.25, lz2, w - 2, 0.1, 0.3, rot); }
+    for (const sx of [-1, 1]) {
+      const bx = sx * w / 4;
+      for (const k of [-1, 1]) { const [px, pz] = P(bx + k * 2.3, -face * 2); this.box(tune ? M.darkSteel : M.gateBlue, px, 0, pz, 0.4, 4, 0.4, rot, true); }
+      const [mx, mz] = P(bx, face * (d / 2 - 1)); this.quad(M.mark, mx, 0.07, mz, 5.4, 0.25, rot, 1, 1);
+    }
+    for (let i = 0; i < 4; i++) { const [tx, tz] = P(-w / 2 + 1, -d / 2 + 3 + i * 1.4); this.box(tune ? M.darkSteel : M.red, tx, 0, tz, 0.8, 1.1, 1.2, rot, true); }
+    const [sx2, sz2] = P(w / 2 - 1.2, 0);
+    for (let r = 0; r < 3; r++) this.box(M.steel, sx2, 0.5 + r * 1.1, sz2, 1.2, 0.06, 6, rot);
+    if (tune) { const [gx, gz] = P(w / 4, -face * 1); this.geo(new THREE.MeshBasicMaterial({ color: 0xb04bff, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }), new THREE.CircleGeometry(3.5, 32).rotateX(-Math.PI / 2), gx, 0.08, gz); }
+    // вывеска
+    const [sgx, sgz] = P(0, fz + face * 0.3);
+    this.sign(sgx, H - 0.95, sgz, tune ? 'TUNING' : 'AVTOSERVIS', tune ? '#7b2cff' : '#d8343f', 12, rot + (face > 0 ? 0 : Math.PI));
+    const [cx, cz] = P(-w / 4, 0);
+    this.services.push({ type: tune ? 'tune' : 'repair', x: cx, z: cz, r: 5.5, nx: face * s, nz: face * c });
+    this.labels.push({ x, z, text: tune ? 'Тюнинг' : 'Автосервис', small: true });
+  }
+
+  // ---------- витрины магазинов на первых этажах ----------
+  shopAtlas() {
+    if (M.shopSigns) return;
+    const names = [['KAFE', '#b5452b'], ['DORIXONA', '#1f9d55'], ['NON UYI', '#c98a2b'], ['MOBILE', '#2f6bff'], ['GULLAR', '#d6407a'], ['KIYIM', '#3a3f4a'],
+      ['BANK', '#17407a'], ['SARTAROSH', '#7a4a2b'], ['KITOBLAR', '#6b3fa0'], ['SHIRINLIK', '#e0648a'], ['OSHXONA', '#a63a2a'], ['OPTIKA', '#24808c']];
+    this.shopNames = names.length;
+    const t = canvasTex(1024, 1024, (g, W, H) => {
+      const rh = H / names.length;
+      names.forEach(([n, col], i) => {
+        const y = i * rh; g.fillStyle = col; g.fillRect(0, y, W, rh);
+        g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(0, y, W, rh * 0.18);
+        g.fillStyle = '#fff'; g.font = `800 ${Math.round(rh * 0.56)}px Montserrat, Arial Black, Arial`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(n, W / 2, y + rh / 2 + 2, W - 40);
+      });
+    }, false);
+    M.shopSigns = new THREE.MeshStandardMaterial({ map: t, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.25, roughness: 0.5 });
+    M.awnings = [0xb5452b, 0x1f9d55, 0x2f6bff, 0xe0a92e, 0x3a3f4a, 0xd6407a].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7 }));
+  }
+  korzinkaFront(part, long, sd, L, D, SLmax = 32, sign = true) {
+    if (!this.isCity || SLmax !== 32 || rnd() < 0.25) return super.korzinkaFront(part, long, sd, L, D, SLmax, sign);
+    this.shopAtlas();
+    const ry = long ? (sd > 0 ? 0 : Math.PI) : (sd > 0 ? Math.PI / 2 : -Math.PI / 2);
+    const at = (t, n) => (long ? [t, sd * (D / 2 + n)] : [sd * (D / 2 + n), -t * sd]);
+    const Pp = (m, g, t, y, n) => { const [lx, lz] = at(t, n); part(m, g, lx, y, lz, ry); };
+    const n = Math.max(1, Math.floor((L - 2) / 7.5)), uw = (L - 2) / n;
+    for (let i = 0; i < n; i++) {
+      const t = -L / 2 + 1 + uw * (i + 0.5), k = Math.floor(rnd() * this.shopNames);
+      Pp(M.kGlass, new THREE.BoxGeometry(uw - 0.6, 2.9, 0.1), t, 1.45, 0.06);
+      Pp(M.kFrame, new THREE.BoxGeometry(uw - 0.3, 0.14, 0.18), t, 2.95, 0.1);
+      for (const e of [-1, 1]) Pp(M.kFrame, new THREE.BoxGeometry(0.16, 3.0, 0.18), t + e * (uw / 2 - 0.25), 1.5, 0.1);
+      Pp(M.kFrame, new THREE.BoxGeometry(1.2, 2.3, 0.14), t + uw * 0.22, 1.15, 0.13);                // дверь
+      const sg = new THREE.PlaneGeometry(uw - 0.8, 0.9), uv = sg.attributes.uv, r0 = 1 - (k + 1) / this.shopNames, r1 = 1 - k / this.shopNames;
+      for (let j = 0; j < uv.count; j++) uv.setY(j, uv.getY(j) > 0.5 ? r1 : r0);
+      Pp(M.shopSigns, sg, t, 3.55, 0.2);
+      Pp(M.kFrame, new THREE.BoxGeometry(uw - 0.6, 1.1, 0.16), t, 3.55, 0.1);
+      if (rnd() < 0.6) { const aw = new THREE.BoxGeometry(uw - 1, 0.08, 1.5); aw.rotateX(-0.28 * (long ? 1 : 1)); Pp(pick(M.awnings), aw, t, 2.95, 0.85); }
+    }
+  }
+
+  // ---------- мелочи на тротуарах: остановки, скамейки, урны, рекламные щиты ----------
+  furniture() {
+    const bench = (x, z, r) => { this.box(M.wood, x, 0.45, z, 1.8, 0.08, 0.5, r); this.box(M.wood, x, 0.6, z, 1.8, 0.45, 0.06, r); this.box(M.darkSteel, x, 0, z, 1.6, 0.45, 0.4, r, true); };
+    const bin = (x, z) => this.geo(M.darkSteel, new THREE.CylinderGeometry(0.28, 0.24, 0.9, 10), x, 0.45, z);
+    const ads = canvasTex(1024, 512, (g, W, H) => {
+      const cells = [['#2f6bff', 'UZB MOBILE', '5G hamma joyda'], ['#e0a92e', 'NON & SOMSA', 'har kuni yangi'], ['#d8343f', 'AVTO SALON', 'kredit 0%'], ['#1f9d55', 'PLOV MARKAZ', 'tushlik 12:00']];
+      cells.forEach(([col, a, b], i) => { const x = (i % 2) * W / 2, y = Math.floor(i / 2) * H / 2; g.fillStyle = col; g.fillRect(x, y, W / 2, H / 2); g.fillStyle = 'rgba(255,255,255,0.15)'; g.beginPath(); g.arc(x + W * 0.42, y + H * 0.1, 150, 0, 7); g.fill();
+        g.fillStyle = '#fff'; g.textAlign = 'left'; g.font = '900 54px Montserrat, Arial Black, Arial'; g.fillText(a, x + 30, y + 110, W / 2 - 60); g.font = '600 30px Inter, Arial'; g.fillText(b, x + 32, y + 165); });
+    }, false);
+    const adM = new THREE.MeshStandardMaterial({ map: ads, emissive: 0xffffff, emissiveMap: ads, emissiveIntensity: 0.2 });
+    let lastStop = -1e9;
+    for (const e of this.edges) {
+      if (e.kind !== 'ground') continue;
+      const P = e.P, sa = e.a.R + 14, sb = P.len - e.b.R - 14, hwT = e.hw + e.sw, D = district((e.a.x + e.b.x) / 2, (e.a.z + e.b.z) / 2);
+      if (sb - sa < 20) continue;
+      // остановка на проспектах
+      if (e.type === 'main' && D.kind !== 'ind' && rnd() < 0.45) {
+        const sd = rnd() < 0.5 ? 1 : -1, s = (sa + sb) / 2, p = cAt(P, s), l = sd * (hwT - 1.2), x = p.x - p.tz * l, z = p.z + p.tx * l, r = this.roadRot(p);
+        if (!this.blockedFor(x, z, e)) {
+          const back = sd * 0.9, bx = x - p.tz * back, bz = z + p.tx * back;
+          this.box(M.stopRoof, x, 2.6, z, 4.4, 0.12, 1.9, r);
+          this.box(M.stopGlass, bx, 0.1, bz, 4.2, 2.4, 0.05, r);
+          for (const k of [-2, 2]) { const qx = bx + p.tx * k, qz = bz + p.tz * k; this.box(M.stopFrame, qx, 0, qz, 0.08, 2.6, 0.08, r, true); }
+          this.box(M.wood, x - p.tz * sd * 0.5, 0.45, z + p.tx * sd * 0.5, 3, 0.08, 0.45, r);
+          const sx = x + p.tx * 2.8, sz = z + p.tz * 2.8; this.geo(M.stopFrame, new THREE.CylinderGeometry(0.05, 0.05, 2.8, 6), sx, 1.4, sz); this.box(M.gateBlue, sx, 2.6, sz, 0.6, 0.6, 0.04, r);
+        }
+      }
+      // скамейки и урны в центре и жилых районах
+      if (D.kind !== 'ind' && D.kind !== 'sub') for (let s = sa + 8, k = 0; s < sb; s += 38, k++) {
+        const sd = k % 2 ? 1 : -1, p = cAt(P, s), l = sd * (hwT - 0.7), x = p.x - p.tz * l, z = p.z + p.tx * l;
+        if (this.blockedFor(x, z, e)) continue;
+        bench(x, z, this.roadRot(p)); bin(x + p.tx * 1.4, z + p.tz * 1.4);
+      }
+      // рекламные щиты у больших дорог
+      if (e.type === 'main' && (D.kind === 'mid' || D.kind === 'ind' || e.a.ring || e.b.ring) && rnd() < 0.3) {
+        const sd = rnd() < 0.5 ? 1 : -1, s = sa + (sb - sa) * rr(0.3, 0.7), p = cAt(P, s), l = sd * (hwT + 3), x = p.x - p.tz * l, z = p.z + p.tx * l, r = this.roadRot(p);
+        if (this.lotFree(x, z, 7, 2, r, 0.5)) {
+          this.addLot(x, z, 7, 1, r);
+          for (const k of [-2.2, 2.2]) this.geo(M.darkSteel, new THREE.CylinderGeometry(0.18, 0.2, 5, 8), x + p.tx * k, 2.5, z + p.tz * k);
+          this.obstacles.add({ x, z, h: r, hl: 2.6, hw: 0.4 });
+          const k = Math.floor(rnd() * 4), g = new THREE.PlaneGeometry(7, 3.5), uv = g.attributes.uv, u0 = (k % 2) / 2, v0 = 0.5 - Math.floor(k / 2) / 2;
+          for (let j = 0; j < uv.count; j++) uv.setXY(j, u0 + uv.getX(j) / 2, v0 + uv.getY(j) / 2);
+          const face = sd > 0 ? Math.PI : 0;
+          g.rotateY(r + face); g.translate(x + p.tz * sd * 0.13, 6.5, z - p.tx * sd * 0.13); this.push(adM, g);
+          this.box(M.darkSteel, x, 4.65, z, 7.3, 3.8, 0.2, r);
+        }
+      }
+    }
   }
 
   // деревья пачками по квадратам 400 м: невидимые пачки не рисуются

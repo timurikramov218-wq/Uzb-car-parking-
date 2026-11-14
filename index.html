@@ -27,6 +27,9 @@
   <canvas id="minimap" width="280" height="280" title="Открыть карту (M)"></canvas>
   <button class="hud-btn map-btn" id="btn-map" aria-label="Карта"><svg viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 4v14M15 6v14" stroke="currentColor" stroke-width="2"/></svg></button>
   <div class="hud-speed"><b id="speed">0</b><span>км/ч</span><i id="gear">N</i><div class="speed-bar"><em id="speed-bar"></em></div></div>
+  <div class="hud-gauges"><div class="gauge" title="Бензин"><svg viewBox="0 0 24 24"><path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h12M14 9h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V8l-3-3"/><path d="M7 8h4"/></svg><div class="gbar"><em id="fuel-bar"></em></div></div>
+    <div class="gauge" title="Состояние"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8V21h3.2l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><div class="gbar"><em id="hp-bar"></em></div></div></div>
+  <button class="svc-btn" id="svc-btn" hidden></button>
   <div id="toast" class="toast"></div>
 </div>
 
@@ -56,18 +59,14 @@
   <div class="bm-legend"><span><i class="l-mount"></i>Районы</span><span><i class="l-sight"></i>Мосты и башня</span><span><i class="l-park"></i>Парки</span><span><i class="l-city"></i>Места</span></div>
 </section>
 
-<!-- Главное меню -->
-<section id="menu" class="screen menu" hidden>
-  <header class="topbar">
-    <div class="brand"><i class="mark"></i><span>UZB <b>Car Parking</b></span></div>
-    <div class="wallet" id="menu-money"></div>
-  </header>
-  <div class="menu-car"><small>За рулём</small><b id="menu-car-name"></b></div>
-  <nav class="dock">
-    <button class="dock-btn" id="btn-garage"><svg viewBox="0 0 24 24"><path d="M3 20V9l9-5 9 5v11"/><path d="M7 20v-6h10v6M7 17h10"/></svg><span>Гараж</span></button>
-    <button class="dock-btn play" id="btn-play"><span>Ехать</span><small>Открытый город</small></button>
-    <button class="dock-btn" id="btn-levels"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 16V8h3.5a2.5 2.5 0 0 1 0 5H9"/></svg><span>Парковка</span></button>
-  </nav>
+<!-- Заставка -->
+<section id="menu" class="screen title">
+  <div class="title-box">
+    <div class="brand huge"><i class="mark"></i><span>UZB <b>Car Parking</b></span></div>
+    <p class="tagline">Открытый город · парковка · тюнинг</p>
+    <button class="start" id="btn-start"><span>Старт</span></button>
+    <div class="title-progress" id="title-progress"><i id="title-bar"></i></div>
+  </div>
   <footer class="menu-foot">
     <button class="link" id="btn-credits">Авторы моделей</button>
     <p class="credits" id="credits" hidden></p>
@@ -82,18 +81,30 @@
   </div>
 </section>
 
-<!-- Гараж -->
-<section id="garage" class="screen side" hidden>
-  <div class="sheet garage">
-    <header class="sheet-head"><h2>Гараж</h2><button class="close" data-close aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
-    <div class="car-list" id="car-tabs"></div>
-    <p class="car-desc" id="car-desc"></p>
-    <div class="specs" id="car-specs"></div>
-    <div class="label">Цвет</div>
-    <div class="swatches" id="color-list"></div>
-    <button class="btn primary wide" id="btn-buy"></button>
-    <div class="wallet small" id="garage-money"></div>
-  </div>
+<!-- Гараж: 3D-студия, машину можно крутить -->
+<section id="garage" class="screen garage-screen" hidden>
+  <header class="topbar">
+    <button class="round" id="btn-home" aria-label="На заставку"><svg viewBox="0 0 24 24"><path d="M15 5 8 12l7 7"/></svg></button>
+    <div class="wallet" id="garage-money"></div>
+  </header>
+  <aside class="gpanel">
+    <div class="gtabs"><button data-tab="cars" class="on">Машины</button><button data-tab="paint">Покраска</button><button data-tab="tune">Тюнинг</button></div>
+    <div class="gtab" id="tab-cars">
+      <div class="car-list" id="car-tabs"></div>
+      <p class="car-desc" id="car-desc"></p>
+      <div class="specs" id="car-specs"></div>
+    </div>
+    <div class="gtab" id="tab-paint" hidden>
+      <div class="label">Кузов</div><div class="swatches" id="color-list"></div>
+      <div class="label">Диски</div><div class="swatches" id="rim-list"></div>
+    </div>
+    <div class="gtab" id="tab-tune" hidden><div class="tune-list" id="tune-list"></div></div>
+  </aside>
+  <div class="gname"><small id="gname-hint">Крути машину мышкой или пальцем</small><b id="menu-car-name"></b></div>
+  <nav class="dock">
+    <button class="dock-btn" id="btn-levels"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 16V8h3.5a2.5 2.5 0 0 1 0 5H9"/></svg><span>Парковка</span></button>
+    <button class="dock-btn play" id="btn-play"><span>Ехать</span><small id="play-sub">Открытый город</small></button>
+  </nav>
 </section>
 
 <!-- Итог уровня -->
@@ -110,11 +121,7 @@
   </div>
 </section>
 
-<section id="loading" class="screen loading">
-  <div class="brand big"><i class="mark"></i><span>UZB <b>Car Parking</b></span></div>
-  <div class="bar"><i id="load-bar"></i></div>
-  <div class="muted" id="load-text">Загрузка машин…</div>
-</section>
+<div class="city-wait" id="city-wait" hidden><b>Город строится…</b><div class="bar"><i id="load-bar"></i></div></div>
 
 <script type="module" src="js/main.js"></script>
 </body>
